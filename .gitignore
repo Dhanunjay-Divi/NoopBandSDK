@@ -1,0 +1,32 @@
+.DS_Store
+.build/
+.gradle/
+build/
+DerivedData/
+local.properties
+
+# Supplier drops remain local until redistribution and dependency rights pass.
+vendor/drop/
+vendor/bin/
+*.aar
+*.jar
+*.framework/
+*.xcframework/
+*.a
+*.so
+*.dylib
+*.apk
+*.ipa
+
+# Credentials, signing material, and private captures never enter this repo.
+.env
+.env.*
+*.mobileprovision
+*.p12
+*.cer
+*.key
+*.pem
+*.jks
+*.keystore
+captures/
+fixtures/private/

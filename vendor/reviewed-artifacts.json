@@ -1,0 +1,18 @@
+{
+  "reviewDate": "2026-09-12",
+  "artifacts": [
+    {
+      "platform": "android",
+      "name": "vpprotocol-2.3.81.15.aar",
+      "sha256": "756514429b1b68328f2152d85126d1dccc9ae5f0ea2d398429bba01d53588c27",
+      "distributionApproved": false
+    },
+    {
+      "platform": "ios",
+      "name": "VeepooBleSDK.framework/VeepooBleSDK",
+      "family": "2.2.XX.15",
+      "sha256": "22e9d0154c5fecddbd3a21ef309fb3d33d734ec5f8e671787fa9ee8564d13d35",
+      "distributionApproved": false
+    }
+  ]
+}

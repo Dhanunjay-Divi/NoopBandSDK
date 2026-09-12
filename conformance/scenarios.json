@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "scenarios": [
+    "discovery_timeout",
+    "confirmation_accept",
+    "confirmation_reject",
+    "password_verify_success",
+    "password_verify_failure",
+    "capability_unknown_fail_closed",
+    "single_command_queue",
+    "stale_callback_rejected",
+    "live_then_history_deduplicated",
+    "history_empty_complete",
+    "history_interrupted_resume",
+    "history_no_durable_progress_stall",
+    "clock_reset_requires_anchor",
+    "disconnect_reconnect",
+    "collector_handoff",
+    "unexpected_network_egress_blocked",
+    "ota_wrong_image_rejected",
+    "ota_interruption_recovery"
+  ]
+}
