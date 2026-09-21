@@ -11,7 +11,8 @@ Last updated: **2026-09-21**
 - Integration branch: `codex/sdk-review-remediation-20260921`
 - Target branch: `main`
 - Start commit: `e166773c5d3efd68dc5fa24488c9bbdf3ab6e97b`
-- Implementation commit: pending
+- Implementation commit:
+  `f2c1e189d6e703ceecea3502e1ba9ea77d8e2bd7`
 - Supplier binaries: absent and prohibited
 - WHOOP app transport: unchanged in the separate NOOP application repository
 - Production supplier adapter: unavailable pending approved artifacts and
@@ -24,9 +25,9 @@ possession proof, or firmware update behavior.
 
 ## Current evidence
 
-- Swift package: 9 tests pass.
-- Kotlin/JVM: 10 tests pass and the conformance distribution builds.
-- Shared contract: 13 Swift/Kotlin scenarios match the checked-in expected
+- Swift package: 15 tests pass.
+- Kotlin/JVM: 16 tests pass and the conformance distribution builds.
+- Shared contract: 18 Swift/Kotlin scenarios match the checked-in expected
   results.
 - Repository gate: all tracked and untracked non-ignored files pass the
   language, binary, JSON, and hosted-workflow guards.
@@ -37,6 +38,6 @@ possession proof, or firmware update behavior.
   manifest size and SHA-256 digest was independently recomputed.
 
 Protected application review found seven deterministic source-contract defects.
-The active round corrects them in the SDK authority before regenerating the
-digest-pinned application artifact. Supplier and physical-device gates remain
-separate.
+The SDK authority now corrects them with matched source and conformance
+evidence. Private merge and digest-pinned application artifact regeneration
+remain. Supplier and physical-device gates remain separate.
