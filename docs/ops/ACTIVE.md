@@ -4,15 +4,14 @@ Last updated: **2026-09-21**
 
 ## Current round
 
-- [Executable neutral wrapper](rounds/2026-09-21-executable-neutral-wrapper.md)
+- [Protected review remediation](rounds/2026-09-21-protected-review-remediation.md)
 
 ## Current boundary
 
-- Integration branch: `codex/noop-band-sdk-core-20260921`
+- Integration branch: `codex/sdk-review-remediation-20260921`
 - Target branch: `main`
-- Start commit: `ee82cc084d361c35267b4228af897e137a6fd66b`
-- Implementation commit:
-  `0abd9a3ce4f808b51bdc93ad28504ac810914631`
+- Start commit: `e166773c5d3efd68dc5fa24488c9bbdf3ab6e97b`
+- Implementation commit: pending
 - Supplier binaries: absent and prohibited
 - WHOOP app transport: unchanged in the separate NOOP application repository
 - Production supplier adapter: unavailable pending approved artifacts and
@@ -37,5 +36,7 @@ possession proof, or firmware update behavior.
   `0abd9a3ce4f808b51bdc93ad28504ac810914631` were byte-identical; every
   manifest size and SHA-256 digest was independently recomputed.
 
-The next software round is protected NOOP application integration of the
-digest-pinned artifact. Supplier and physical-device gates remain separate.
+Protected application review found seven deterministic source-contract defects.
+The active round corrects them in the SDK authority before regenerating the
+digest-pinned application artifact. Supplier and physical-device gates remain
+separate.

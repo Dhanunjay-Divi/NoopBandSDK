@@ -70,6 +70,80 @@ struct BandSessionMachineTests {
         #expect(result.acceptedSamples == 0)
     }
 
+    @Test("Durable history checkpoints resume from the committed cursor")
+    func durableHistoryCheckpointRestores() async throws {
+        let result = try await BandConformanceRunner.run(
+            "history_checkpoint_restored"
+        )
+        #expect(result.failure == nil)
+        #expect(result.acknowledgedCursor == "cursor-3")
+        #expect(result.acceptedSamples == 1)
+    }
+
+    @Test("Firmware capability failures retain their dedicated category")
+    func firmwareEligibilityIsSpecific() async throws {
+        let result = try await BandConformanceRunner.run(
+            "firmware_eligibility_specific"
+        )
+        #expect(result.failure == BandFailureCategory.updateNotEligible.rawValue)
+    }
+
+    @Test("Unnegotiated streams fail closed")
+    func unnegotiatedStreamsFailClosed() async throws {
+        let result = try await BandConformanceRunner.run(
+            "unnegotiated_stream_rejected"
+        )
+        #expect(result.failure == BandFailureCategory.unsupported.rawValue)
+        #expect(result.acceptedSamples == 0)
+    }
+
+    @Test("Firmware updates cannot overlap live collection")
+    func firmwareCannotOverlapLiveCollection() async throws {
+        let result = try await BandConformanceRunner.run(
+            "firmware_blocked_during_live"
+        )
+        #expect(result.failure == BandFailureCategory.busy.rawValue)
+    }
+
+    @Test("Incomplete and overflowed history requires durable state")
+    func historyStateRequiresDurableReceipt() async throws {
+        let result = try await BandConformanceRunner.run(
+            "history_state_requires_durable_receipt"
+        )
+        #expect(result.failure == BandFailureCategory.historyStalled.rawValue)
+        #expect(result.acknowledgedCursor == "cursor-3")
+        #expect(result.events.contains("receipt_rejected"))
+    }
+
+    @Test("Sample sequences share Android's signed 64-bit domain")
+    func sampleSequenceDomainIsSigned64Bit() throws {
+        let accepted = BandSample(
+            identity: BandSampleIdentity(
+                stream: .heartRate,
+                sequence: BandContractLimits.maximumSampleSequence,
+                deviceTimeMilliseconds: 1
+            ),
+            value: 72,
+            unit: .beatsPerMinute,
+            quality: .accepted
+        )
+        try accepted.validate()
+
+        let rejected = BandSample(
+            identity: BandSampleIdentity(
+                stream: .heartRate,
+                sequence: BandContractLimits.maximumSampleSequence + 1,
+                deviceTimeMilliseconds: 1
+            ),
+            value: 72,
+            unit: .beatsPerMinute,
+            quality: .accepted
+        )
+        #expect(throws: BandFailureCategory.invalidInput) {
+            try rejected.validate()
+        }
+    }
+
     @Test("Diagnostics are bounded and structurally identifier-free")
     func diagnosticsAreBoundedAndRedacted() async throws {
         let recorder = BandDiagnosticsRecorder(capacity: 2)
