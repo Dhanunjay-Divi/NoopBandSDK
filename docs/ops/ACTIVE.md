@@ -10,6 +10,8 @@ Last updated: **2026-09-21**
 
 - Branch: `codex/noop-band-sdk-core-20260921`
 - Start commit: `ee82cc084d361c35267b4228af897e137a6fd66b`
+- Implementation commit:
+  `0abd9a3ce4f808b51bdc93ad28504ac810914631`
 - Supplier binaries: absent and prohibited
 - WHOOP app transport: unchanged in the separate NOOP application repository
 - Production supplier adapter: unavailable pending approved artifacts and
@@ -29,6 +31,9 @@ possession proof, or firmware update behavior.
   language, binary, JSON, and hosted-workflow guards.
 - Exporter: a dirty worktree is rejected before any artifact directory is
   published.
+- Exact clean export: two independently generated 10-file artifacts from
+  `0abd9a3ce4f808b51bdc93ad28504ac810914631` were byte-identical; every
+  manifest size and SHA-256 digest was independently recomputed.
 
-The implementation commit, clean exact-revision export, private remote push,
-and application artifact integration remain ordered work in this round.
+The private remote push, normal SDK-main integration, and protected NOOP
+application artifact integration remain ordered work.

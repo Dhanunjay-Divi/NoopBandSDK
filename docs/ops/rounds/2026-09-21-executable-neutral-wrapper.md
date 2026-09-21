@@ -2,10 +2,11 @@
 
 ## Status
 
-- State: `in progress`
+- State: `complete`
 - Branch: `codex/noop-band-sdk-core-20260921`
 - Start commit: `ee82cc084d361c35267b4228af897e137a6fd66b`
-- End commit: pending
+- Implementation commit:
+  `0abd9a3ce4f808b51bdc93ad28504ac810914631`
 
 ## Objective
 
@@ -88,6 +89,15 @@ Physical and supplier gates remain explicitly open.
 - Dirty source export attempt using start commit
   `ee82cc084d361c35267b4228af897e137a6fd66b`
   - Expected rejection: `source repository must be clean before export`.
+- Mistyped clean revision
+  `0abd9a339125b644cfd4f0f96a762e05fed59369`
+  - Expected rejection: `revision must match the checked-out commit`.
+- Two clean exports from exact implementation commit
+  `0abd9a3ce4f808b51bdc93ad28504ac810914631`
+  - Pass: 10 files exported each.
+  - Pass: recursive comparison found no differences.
+  - Pass: an independent verifier recomputed every byte count and SHA-256
+    digest and found no missing or extra artifact file.
 - `python3 -m json.tool` on both JSON contracts, Python byte compilation,
   `git diff --check`, and repository language/binary gates
   - Pass.
@@ -99,14 +109,9 @@ corrected before the final passing wall.
 
 ## Remaining ordered work
 
-1. Commit the verified implementation.
-2. Export from that exact clean implementation commit and independently verify
-   every manifest digest.
-3. Record the exact implementation revision and close this round in a
-   documentation-only commit.
-4. Make the remote repository private before publishing the branch.
-5. Merge normally to SDK `main`.
-6. Vendor the digest-pinned source artifact into a protected NOOP application
+1. Make the remote repository private before publishing the branch.
+2. Merge normally to SDK `main`.
+3. Vendor the digest-pinned source artifact into a protected NOOP application
    branch, default the virtual first-party source off, preserve WHOOP, compile
    both phone platforms, and merge only after protected checks pass.
 
