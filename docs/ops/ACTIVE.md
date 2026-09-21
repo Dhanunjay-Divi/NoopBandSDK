@@ -11,8 +11,9 @@ Last updated: **2026-09-21**
 - Protected branch: `main`
 - Active branch: `codex/sdk-runtime-hardening-20260921`
 - Start commit: `a04c263e7229532038b13c7da343a43747864390`
-- Implementation commit: pending
-- Evidence commit: pending
+- Implementation commit:
+  `40e6d3b32154610ec83df4b1f6510c189bb98531`
+- Evidence commit: current record commit
 - Protected merge: pending
 - Supplier binaries: absent and prohibited
 - WHOOP app transport: unchanged in the separate NOOP application repository
