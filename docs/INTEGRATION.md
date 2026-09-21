@@ -48,8 +48,47 @@ captures, health data, endpoints, or firmware.
 9. Do not expose pairing, possession, haptic, alarm, wear, firmware, or sensor
    capabilities until the exact supplier and physical gates pass.
 
-Sample sequences use the non-negative signed 64-bit range on both platforms.
-Adapters must reject supplier values outside `0 ... Int64.max`.
+Capability callbacks must include the session generation captured for the
+supplier request. Sample sequences and device-time milliseconds use the
+non-negative signed 64-bit range on both platforms. Bounded protocol strings
+use UTF-8 byte counts. Adapters must reject values outside these domains.
+
+## Band connection and authentication pass
+
+The production adapter must preserve these distinct authorities:
+
+1. The NOOP account service authenticates the person and grants one phone the
+   collector lease. This is application/cloud authorization, not BLE trust.
+2. The phone scans for supplier candidates and exposes only an opaque handle to
+   the neutral SDK. Device names, addresses, serials, and advertisements do not
+   enter diagnostics.
+3. The supplier transport performs the approved identify/possession challenge.
+   The exact vibration, tap, printed-label, or challenge-response behavior is
+   unavailable until the reviewed firmware and supplier SDK define it.
+4. After possession succeeds, the supplier transport connects and performs its
+   approved cryptographic authentication. Long-lived secrets belong in
+   platform secure storage and never in this repository, logs, preferences, or
+   source artifacts.
+5. The neutral session enters capability negotiation. The adapter passes the
+   current session generation with the report; stale reports are rejected
+   without changing the replacement session.
+6. The app enables only negotiated streams and commands. Unsupported inputs
+   remain missing, and firmware operations use their own diagnostics and cannot
+   overlap live collection.
+7. Live samples are committed through the app storage boundary. History cursor
+   progress occurs only after an exact durable receipt; each history operation
+   must receive its own terminal durable result.
+8. Cancellation, timeout, disconnect, and supplier failure terminate the active
+   neutral operation explicitly. Reconnect creates a new generation and rejects
+   old callbacks.
+9. Collector handoff flushes accepted samples and checkpoints, releases the
+   account lease, disconnects the old phone, and only then permits another
+   authorized phone to collect.
+
+The neutral core now enforces steps 5 through 8 deterministically. Steps 1
+through 4 and physical behavior in step 9 require the NOOP account integration,
+approved supplier artifacts, firmware contract, secure-key design, and
+physical-device evidence.
 
 ## Release sequence
 

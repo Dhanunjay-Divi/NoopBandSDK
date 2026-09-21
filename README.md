@@ -44,8 +44,11 @@ Kotlin/JVM neutral cores plus a deterministic virtual band. The software proves
 session serialization, stale-callback rejection, capability fail-closed
 behavior, durable-before-ack history, live/history separation, and bounded
 diagnostics. It also rejects out-of-order history cursors, duplicate live
-identities, oversized callback metadata, and unsupported command classes. It
-does not contain or validate a supplier transport.
+identities, nonadvancing ranges, invalid device time, oversized UTF-8 metadata,
+and unsupported command classes. Active operations have explicit cancellation
+and categorized failure terminals, firmware uses a dedicated diagnostic
+family, and the recent identity cache remains bounded. It does not contain or
+validate a supplier transport.
 
 The owner-supplied HBand/Veepoo package was statically assessed on 2026-09-12.
 It remains a candidate phone transport, not a production-approved SDK. The
