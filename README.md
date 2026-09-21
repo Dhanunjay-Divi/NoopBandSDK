@@ -39,9 +39,17 @@ NOOP mobile storage and product adapters
 
 ## Current status
 
-The owner-supplied HBand/Veepoo package was statically assessed on
-2026-09-12. It is a candidate phone transport, not a production-approved SDK.
-The exact production model, function report, printed-label mapping,
+The repository now contains executable, semantically matched Swift and
+Kotlin/JVM neutral cores plus a deterministic virtual band. The software proves
+session serialization, stale-callback rejection, capability fail-closed
+behavior, durable-before-ack history, live/history separation, and bounded
+diagnostics. It also rejects out-of-order history cursors, duplicate live
+identities, oversized callback metadata, and unsupported command classes. It
+does not contain or validate a supplier transport.
+
+The owner-supplied HBand/Veepoo package was statically assessed on 2026-09-12.
+It remains a candidate phone transport, not a production-approved SDK. The
+exact production model, function report, printed-label mapping,
 possession-proof firmware, redistribution authority, runtime egress, and
 physical behavior remain open.
 
@@ -50,3 +58,29 @@ Run the local repository gate:
 ```bash
 python3 scripts/check_repository.py
 ```
+
+Run platform tests:
+
+```bash
+swift test --package-path apple
+
+# Use Gradle 8.14.5 or the pinned NOOP app launcher.
+/path/to/gradlew -p android --no-daemon test installDist
+```
+
+Compare every deterministic scenario across both executables:
+
+```bash
+python3 scripts/run_conformance.py
+```
+
+Create an untracked, digest-pinned source artifact for app integration:
+
+```bash
+python3 scripts/export_source_artifact.py \
+  --revision "$(git rev-parse HEAD)" \
+  --output /tmp/noop-band-sdk-artifact
+```
+
+See `docs/INTEGRATION.md` for the app boundary. The artifact does not enable a
+supplier path, alter WHOOP support, or establish physical behavior.

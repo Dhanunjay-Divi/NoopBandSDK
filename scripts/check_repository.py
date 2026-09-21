@@ -47,11 +47,27 @@ BINARY_SUFFIXES = {
     ".so",
 }
 CJK = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+SAFE_SCENARIO = re.compile(r"[a-z][a-z0-9_]{2,63}")
+EXPECTED_RESULT_KEYS = {
+    "events",
+    "finalState",
+    "acknowledgedCursor",
+    "acceptedSamples",
+    "failure",
+}
 
 
 def repository_files() -> list[Path]:
     result = subprocess.run(
-        ["git", "-C", str(ROOT), "ls-files"],
+        [
+            "git",
+            "-C",
+            str(ROOT),
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ],
         check=False,
         capture_output=True,
         text=True,
@@ -97,6 +113,84 @@ def main() -> int:
             json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:
             errors.append(f"invalid JSON {path.relative_to(ROOT)}: {error}")
+
+    try:
+        scenario_payload = json.loads(
+            scenarios_path.read_text(encoding="utf-8")
+        )
+        scenarios = scenario_payload.get("scenarios")
+        if (
+            scenario_payload.get("schemaVersion") != 1
+            or not isinstance(scenarios, list)
+            or not scenarios
+        ):
+            errors.append("conformance scenario contract is invalid")
+        else:
+            identifiers: set[str] = set()
+            automated = 0
+            for scenario in scenarios:
+                if not isinstance(scenario, dict):
+                    errors.append("conformance scenario must be an object")
+                    continue
+                identifier = scenario.get("id")
+                if (
+                    not isinstance(identifier, str)
+                    or SAFE_SCENARIO.fullmatch(identifier) is None
+                ):
+                    errors.append("conformance scenario id is invalid")
+                    continue
+                if identifier in identifiers:
+                    errors.append(
+                        f"duplicate conformance scenario id: {identifier}"
+                    )
+                identifiers.add(identifier)
+                if scenario.get("automated") is True:
+                    automated += 1
+                    expected = scenario.get("expected")
+                    if (
+                        not isinstance(expected, dict)
+                        or set(expected) != EXPECTED_RESULT_KEYS
+                        or not isinstance(expected.get("events"), list)
+                        or not expected["events"]
+                        or not all(
+                            isinstance(event, str) and event
+                            for event in expected["events"]
+                        )
+                        or not isinstance(expected.get("finalState"), str)
+                        or not isinstance(expected.get("acceptedSamples"), int)
+                        or expected["acceptedSamples"] < 0
+                        or (
+                            expected.get("acknowledgedCursor") is not None
+                            and not isinstance(
+                                expected["acknowledgedCursor"], str
+                            )
+                        )
+                        or (
+                            expected.get("failure") is not None
+                            and not isinstance(expected["failure"], str)
+                        )
+                    ):
+                        errors.append(
+                            f"automated scenario is invalid: {identifier}"
+                        )
+                elif (
+                    scenario.get("automated") is not False
+                    or not isinstance(scenario.get("externalGate"), str)
+                    or not scenario["externalGate"]
+                ):
+                    errors.append(
+                        f"external scenario gate is invalid: {identifier}"
+                    )
+            if automated == 0:
+                errors.append("no automated conformance scenarios")
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    if any(
+        path.relative_to(ROOT).parts[:2] == (".github", "workflows")
+        for path in files
+    ):
+        errors.append("hosted workflows require explicit budget approval")
 
     if errors:
         for error in errors:
