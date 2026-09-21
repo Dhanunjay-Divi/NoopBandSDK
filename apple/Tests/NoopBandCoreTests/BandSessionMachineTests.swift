@@ -153,6 +153,44 @@ struct BandSessionMachineTests {
         #expect(result.finalState == BandSessionState.ready.rawValue)
     }
 
+    @Test("Receipts and operation tokens are bound to one session")
+    func receiptsAndTokensAreSessionBound() async throws {
+        let result = try await BandConformanceRunner.run(
+            "cross_session_credentials_rejected"
+        )
+        #expect(result.failure == BandFailureCategory.staleCallback.rawValue)
+        #expect(result.events.contains("foreign_live_receipt_rejected"))
+        #expect(result.events.contains("foreign_history_receipt_rejected"))
+        #expect(result.events.contains("foreign_operation_token_rejected"))
+        #expect(result.finalState == BandSessionState.ready.rawValue)
+    }
+
+    @Test("Older receipts and operation tokens cannot replay in one session")
+    func credentialIssuanceCannotReplay() async throws {
+        let result = try await BandConformanceRunner.run(
+            "same_session_replay_rejected"
+        )
+        #expect(result.failure == BandFailureCategory.storage.rawValue)
+        #expect(result.events.contains("stale_live_receipt_rejected"))
+        #expect(result.events.contains("stale_operation_token_rejected"))
+        #expect(result.events.contains("stale_history_receipt_rejected"))
+        #expect(result.acknowledgedCursor == "cursor-3")
+        #expect(result.finalState == BandSessionState.ready.rawValue)
+    }
+
+    @Test("Scan and reconnect terminal callbacks are generation fenced")
+    func terminalCallbacksAreGenerationFenced() async throws {
+        let result = try await BandConformanceRunner.run(
+            "stale_terminal_callbacks_rejected"
+        )
+        #expect(result.failure == BandFailureCategory.staleCallback.rawValue)
+        #expect(result.events.contains("stale_scan_cancel_rejected"))
+        #expect(result.events.contains("stale_scan_failure_rejected"))
+        #expect(result.events.contains("stale_reconnect_interrupt_rejected"))
+        #expect(result.events.contains("stale_reconnect_completion_rejected"))
+        #expect(result.finalState == BandSessionState.ready.rawValue)
+    }
+
     @Test("Device time rejects negative samples and checkpoints")
     func deviceTimeDomainIsNonnegative() async throws {
         let result = try await BandConformanceRunner.run(

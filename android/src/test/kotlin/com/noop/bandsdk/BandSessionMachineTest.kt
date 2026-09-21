@@ -162,6 +162,50 @@ class BandSessionMachineTest {
     }
 
     @Test
+    fun receiptsAndTokensAreSessionBound() {
+        val result = BandConformanceRunner.run(
+            "cross_session_credentials_rejected",
+        )
+        assertEquals(
+            BandFailureCategory.STALE_CALLBACK.wireValue,
+            result.failure,
+        )
+        assertTrue("foreign_live_receipt_rejected" in result.events)
+        assertTrue("foreign_history_receipt_rejected" in result.events)
+        assertTrue("foreign_operation_token_rejected" in result.events)
+        assertEquals(BandSessionState.READY.wireValue, result.finalState)
+    }
+
+    @Test
+    fun credentialIssuanceCannotReplay() {
+        val result = BandConformanceRunner.run(
+            "same_session_replay_rejected",
+        )
+        assertEquals(BandFailureCategory.STORAGE.wireValue, result.failure)
+        assertTrue("stale_live_receipt_rejected" in result.events)
+        assertTrue("stale_operation_token_rejected" in result.events)
+        assertTrue("stale_history_receipt_rejected" in result.events)
+        assertEquals("cursor-3", result.acknowledgedCursor)
+        assertEquals(BandSessionState.READY.wireValue, result.finalState)
+    }
+
+    @Test
+    fun terminalCallbacksAreGenerationFenced() {
+        val result = BandConformanceRunner.run(
+            "stale_terminal_callbacks_rejected",
+        )
+        assertEquals(
+            BandFailureCategory.STALE_CALLBACK.wireValue,
+            result.failure,
+        )
+        assertTrue("stale_scan_cancel_rejected" in result.events)
+        assertTrue("stale_scan_failure_rejected" in result.events)
+        assertTrue("stale_reconnect_interrupt_rejected" in result.events)
+        assertTrue("stale_reconnect_completion_rejected" in result.events)
+        assertEquals(BandSessionState.READY.wireValue, result.finalState)
+    }
+
+    @Test
     fun deviceTimeRejectsNegativeSamplesAndCheckpoints() {
         val result = BandConformanceRunner.run(
             "invalid_device_time_rejected",
