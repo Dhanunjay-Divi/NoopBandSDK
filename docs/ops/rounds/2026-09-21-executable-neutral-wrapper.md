@@ -109,9 +109,7 @@ corrected before the final passing wall.
 
 ## Remaining ordered work
 
-1. Make the remote repository private before publishing the branch.
-2. Merge normally to SDK `main`.
-3. Vendor the digest-pinned source artifact into a protected NOOP application
+1. Vendor the digest-pinned source artifact into a protected NOOP application
    branch, default the virtual first-party source off, preserve WHOOP, compile
    both phone platforms, and merge only after protected checks pass.
 

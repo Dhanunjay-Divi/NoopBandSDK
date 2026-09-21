@@ -8,7 +8,8 @@ Last updated: **2026-09-21**
 
 ## Current boundary
 
-- Branch: `codex/noop-band-sdk-core-20260921`
+- Integration branch: `codex/noop-band-sdk-core-20260921`
+- Target branch: `main`
 - Start commit: `ee82cc084d361c35267b4228af897e137a6fd66b`
 - Implementation commit:
   `0abd9a3ce4f808b51bdc93ad28504ac810914631`
@@ -16,6 +17,7 @@ Last updated: **2026-09-21**
 - WHOOP app transport: unchanged in the separate NOOP application repository
 - Production supplier adapter: unavailable pending approved artifacts and
   physical evidence
+- Remote visibility: `PRIVATE`
 
 The round may prove only deterministic software contracts. It cannot prove BLE,
 background execution, haptics, flash retention, battery, sensor accuracy,
@@ -35,5 +37,5 @@ possession proof, or firmware update behavior.
   `0abd9a3ce4f808b51bdc93ad28504ac810914631` were byte-identical; every
   manifest size and SHA-256 digest was independently recomputed.
 
-The private remote push, normal SDK-main integration, and protected NOOP
-application artifact integration remain ordered work.
+The next software round is protected NOOP application integration of the
+digest-pinned artifact. Supplier and physical-device gates remain separate.
