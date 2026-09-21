@@ -5,6 +5,8 @@
 - State: `in_progress`
 - Branch: `codex/sdk-second-review-remediation-20260921`
 - Start commit: `f32633a9fc63a9edd273f38e97b48c216a798234`
+- Implementation commit:
+  `db072eb59783fa7dbbc1e51e2c00cefb167467df`
 
 ## Objective
 
@@ -88,11 +90,10 @@ tokens, payloads, or arbitrary exception text.
 
 ## Remaining ordered work
 
-1. Complete the independent read-only review of this exact worktree.
-2. Commit, push, and merge the private SDK branch normally.
-3. Export the exact clean implementation commit twice and compare bytes.
-4. Replace and repin the generated artifact in NOOP application PR `#17`.
-5. Run application Apple, Android, release-control, and hosted exact-SHA gates.
+1. Push and merge the private SDK branch normally.
+2. Export the exact clean merged revision twice and compare bytes.
+3. Replace and repin the generated artifact in NOOP application PR `#17`.
+4. Run application Apple, Android, release-control, and hosted exact-SHA gates.
 
 ## External gates
 

@@ -11,7 +11,8 @@ Last updated: **2026-09-21**
 - Integration branch: `codex/sdk-second-review-remediation-20260921`
 - Target branch: `main`
 - Start commit: `f32633a9fc63a9edd273f38e97b48c216a798234`
-- Implementation commit: pending local commit
+- Implementation commit:
+  `db072eb59783fa7dbbc1e51e2c00cefb167467df`
 - Supplier binaries: absent and prohibited
 - WHOOP app transport: unchanged in the separate NOOP application repository
 - Production supplier adapter: unavailable pending approved artifacts and
@@ -36,6 +37,6 @@ possession proof, or firmware update behavior.
 
 The first protected review remediation is merged. A second review found nine
 additional deterministic source-contract defects. This branch corrects them
-with matched source and conformance evidence. Independent review, private
-commit/merge, reproducible export, and digest-pinned application artifact
-regeneration remain. Supplier and physical-device gates remain separate.
+with matched source and conformance evidence. Private push/merge, reproducible
+export, and digest-pinned application artifact regeneration remain. Supplier
+and physical-device gates remain separate.
