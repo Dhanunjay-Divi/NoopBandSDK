@@ -2,11 +2,15 @@
 
 ## Status
 
-- State: `in_progress`
+- State: `complete`
 - Branch: `codex/sdk-second-review-remediation-20260921`
 - Start commit: `f32633a9fc63a9edd273f38e97b48c216a798234`
 - Implementation commit:
   `db072eb59783fa7dbbc1e51e2c00cefb167467df`
+- Evidence commit:
+  `89dd6867f7e82d0bb4be99b07cf7349586a0b2f3`
+- Protected merge:
+  `34028a2ab56feb90ae774b0ee0055529ce175723`
 
 ## Objective
 
@@ -87,13 +91,19 @@ tokens, payloads, or arbitrary exception text.
 - Independent read-only source review:
   - Initially found one P1 and four P2 edge defects.
   - Pass after correction: all five findings resolved with no new regression.
+- Exact clean export:
+  - Two independently generated 10-file artifacts from protected merge
+    `34028a2ab56feb90ae774b0ee0055529ce175723` are byte-identical.
+  - Every manifest size and SHA-256 digest was independently recomputed.
+  - Manifest SHA-256:
+    `f0baf194ae0daa51e2d7c02d83b9324efd5bc278080aa622857ecfa32af54f8b`.
 
-## Remaining ordered work
+## Application follow-up
 
-1. Push and merge the private SDK branch normally.
-2. Export the exact clean merged revision twice and compare bytes.
-3. Replace and repin the generated artifact in NOOP application PR `#17`.
-4. Run application Apple, Android, release-control, and hosted exact-SHA gates.
+1. Replace and repin the generated artifact in NOOP application PR `#17`.
+2. Run application Apple, Android, release-control, and hosted exact-SHA gates.
+3. Preserve the independent WHOOP transport and keep the supplier path
+   default-off until physical gates pass.
 
 ## External gates
 
