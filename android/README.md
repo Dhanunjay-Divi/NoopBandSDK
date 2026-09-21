@@ -11,6 +11,8 @@ Implemented neutral-core gates:
 - capability revision validation and fail-closed incompatibility;
 - live/history separation and deterministic deduplication;
 - durable app-store receipt before historical checkpoint advance;
+- explicit operation cancellation and categorized failure terminals;
+- UTF-8 byte and non-negative signed 64-bit input domains;
 - bounded diagnostics with no arbitrary identifier or health-value field; and
 - deterministic virtual-band conformance scenarios.
 

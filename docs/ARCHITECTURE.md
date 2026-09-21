@@ -51,6 +51,9 @@ has:
 
 Firmware update is additionally excluded while live collection is active. The
 collector must stop live delivery before requesting an update token.
+Every active operation has an explicit success, cancellation, or categorized
+failure terminal. A terminal history receipt ends that history range; the
+adapter cannot submit another chunk on the same operation.
 
 ## Durable history
 
@@ -64,6 +67,21 @@ state. Cursor advancement requires a durable receipt that confirms those exact
 flags and confirms their metadata was committed. An incomplete range may
 advance to its next cursor after that commit, but the history operation cannot
 finish until a terminal chunk is durably acknowledged.
+
+The in-memory recent-identity cache never exceeds 65,536 entries. It is a
+bounded duplicate-suppression aid, not the durable source of truth. Application
+storage remains authoritative for idempotency outside that recent window.
+
+## Callback and input domains
+
+Every asynchronous supplier callback carries the session generation captured
+when its request was issued. Capability, live, history, and receipt callbacks
+from older generations fail closed without mutating the current session.
+
+All bounded protocol strings use UTF-8 byte length on Apple and Android.
+Sample sequence values use `0 ... Int64.max`, and device time is a non-negative
+signed 64-bit millisecond value. The supplier adapter must reject values outside
+those domains before they reach application storage.
 
 ## Health and data boundary
 

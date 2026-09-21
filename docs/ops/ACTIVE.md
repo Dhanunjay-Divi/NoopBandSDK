@@ -4,15 +4,15 @@ Last updated: **2026-09-21**
 
 ## Current round
 
-- [Protected review remediation](rounds/2026-09-21-protected-review-remediation.md)
+- [Second protected review remediation](rounds/2026-09-21-second-protected-review-remediation.md)
 
 ## Current boundary
 
-- Integration branch: `codex/sdk-review-remediation-20260921`
+- Integration branch: `codex/sdk-second-review-remediation-20260921`
 - Target branch: `main`
-- Start commit: `e166773c5d3efd68dc5fa24488c9bbdf3ab6e97b`
+- Start commit: `f32633a9fc63a9edd273f38e97b48c216a798234`
 - Implementation commit:
-  `f2c1e189d6e703ceecea3502e1ba9ea77d8e2bd7`
+  `db072eb59783fa7dbbc1e51e2c00cefb167467df`
 - Supplier binaries: absent and prohibited
 - WHOOP app transport: unchanged in the separate NOOP application repository
 - Production supplier adapter: unavailable pending approved artifacts and
@@ -25,19 +25,18 @@ possession proof, or firmware update behavior.
 
 ## Current evidence
 
-- Swift package: 15 tests pass.
-- Kotlin/JVM: 16 tests pass and the conformance distribution builds.
-- Shared contract: 18 Swift/Kotlin scenarios match the checked-in expected
+- Swift package: 24 tests pass.
+- Kotlin/JVM: 25 tests pass and the conformance distribution builds.
+- Shared contract: 27 Swift/Kotlin scenarios match the checked-in expected
   results.
 - Repository gate: all tracked and untracked non-ignored files pass the
   language, binary, JSON, and hosted-workflow guards.
-- Exporter: a dirty worktree is rejected before any artifact directory is
-  published.
-- Exact clean export: two independently generated 10-file artifacts from
-  `0abd9a3ce4f808b51bdc93ad28504ac810914631` were byte-identical; every
-  manifest size and SHA-256 digest was independently recomputed.
+- JSON validation and `git diff --check` pass.
+- Independent read-only review initially found one P1 and four P2 edge defects;
+  all five are corrected and the exact follow-up diff has no remaining finding.
 
-Protected application review found seven deterministic source-contract defects.
-The SDK authority now corrects them with matched source and conformance
-evidence. Private merge and digest-pinned application artifact regeneration
-remain. Supplier and physical-device gates remain separate.
+The first protected review remediation is merged. A second review found nine
+additional deterministic source-contract defects. This branch corrects them
+with matched source and conformance evidence. Private push/merge, reproducible
+export, and digest-pinned application artifact regeneration remain. Supplier
+and physical-device gates remain separate.

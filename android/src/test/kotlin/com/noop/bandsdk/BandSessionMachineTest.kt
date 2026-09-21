@@ -150,6 +150,121 @@ class BandSessionMachineTest {
     }
 
     @Test
+    fun capabilityCallbacksAreGenerationFenced() {
+        val result = BandConformanceRunner.run(
+            "stale_capability_callback_rejected",
+        )
+        assertEquals(
+            BandFailureCategory.STALE_CALLBACK.wireValue,
+            result.failure,
+        )
+        assertEquals(BandSessionState.READY.wireValue, result.finalState)
+    }
+
+    @Test
+    fun deviceTimeRejectsNegativeSamplesAndCheckpoints() {
+        val result = BandConformanceRunner.run(
+            "invalid_device_time_rejected",
+        )
+        assertEquals(
+            BandFailureCategory.INVALID_INPUT.wireValue,
+            result.failure,
+        )
+
+        val error = assertFailsWith<BandException> {
+            BandHistoryCheckpoint(
+                sourceIdentity = "source",
+                acknowledgedCursor = null,
+                lastHistoryComplete = null,
+                durableSampleIdentities = setOf(
+                    BandSampleIdentity(
+                        stream = BandStreamKind.HEART_RATE,
+                        sequence = 1,
+                        deviceTimeMilliseconds = -1,
+                    ),
+                ),
+            ).validate()
+        }
+        assertEquals(BandFailureCategory.INVALID_INPUT, error.category)
+    }
+
+    @Test
+    fun eachHistoryOperationRequiresItsOwnDurableReceipt() {
+        val result = BandConformanceRunner.run(
+            "history_operation_requires_own_receipt",
+        )
+        assertEquals(BandFailureCategory.STORAGE.wireValue, result.failure)
+        assertEquals("operation_cancelled", result.events.last())
+    }
+
+    @Test
+    fun firmwareLifecycleUsesFirmwareDiagnostics() {
+        val result = BandConformanceRunner.run(
+            "firmware_diagnostics_specific",
+        )
+        assertEquals("firmware_diagnostics_specific", result.events.last())
+    }
+
+    @Test
+    fun incompleteHistoryRequiresCursorProgress() {
+        val result = BandConformanceRunner.run(
+            "history_nonadvancing_cursor_rejected",
+        )
+        assertEquals(
+            BandFailureCategory.HISTORY_STALLED.wireValue,
+            result.failure,
+        )
+    }
+
+    @Test
+    fun boundedStringsUseUtf8ByteLength() {
+        val result = BandConformanceRunner.run("utf8_length_cross_platform")
+        assertEquals(
+            BandFailureCategory.INVALID_INPUT.wireValue,
+            result.failure,
+        )
+        val malformed = assertFailsWith<BandException> {
+            BandPairingCandidate(
+                handle = "\uD800",
+                compatible = true,
+                identifyEligible = true,
+            ).validate()
+        }
+        assertEquals(BandFailureCategory.INVALID_INPUT, malformed.category)
+    }
+
+    @Test
+    fun samplingRequiresNegotiatedSensorCapability() {
+        val result = BandConformanceRunner.run(
+            "sampling_requires_sensor_capability",
+        )
+        assertEquals(
+            BandFailureCategory.UNSUPPORTED.wireValue,
+            result.failure,
+        )
+    }
+
+    @Test
+    fun recentDurableIdentitiesRemainBoundedInMemory() {
+        val result = BandConformanceRunner.run(
+            "durable_identity_cache_bounded",
+        )
+        assertTrue("identity_cache_bounded" in result.events)
+        assertEquals(2, result.acceptedSamples)
+    }
+
+    @Test
+    fun activeOperationsSupportCancellationAndFailureTerminals() {
+        val result = BandConformanceRunner.run("operation_terminal_paths")
+        assertTrue("operation_cancelled" in result.events)
+        assertTrue("operation_failed" in result.events)
+        assertTrue("disconnect_recovery" in result.events)
+        assertTrue("stale_callback_rejected" in result.events)
+        assertEquals("reconnected", result.events.last())
+        assertEquals(BandSessionState.READY.wireValue, result.finalState)
+    }
+
+    @Test
     fun diagnosticsAreBoundedAndStructurallyRedacted() {
         val recorder = BandDiagnosticsRecorder(2)
         recorder.record(

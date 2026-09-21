@@ -8,3 +8,4 @@
 | SDK-D-004 | Supplier binaries remain outside Git and outside application builds until rights, SBOM, security, egress, exact-model, and physical gates pass. | Active |
 | SDK-D-005 | Supplier types and persistence remain behind neutral Apple/Android adapters; NOOP owns provenance, storage, checkpoints, diagnostics, and product behavior. | Active |
 | SDK-D-006 | No GitHub Actions workflow is enabled initially. Local deterministic checks precede one budgeted hosted release check when approved. | Active |
+| SDK-D-007 | Cross-platform bounded strings use UTF-8 bytes; samples use non-negative signed 64-bit sequence/time domains; recent identity memory is bounded and application storage remains the durable dedupe authority. | Active |

@@ -144,6 +144,102 @@ struct BandSessionMachineTests {
         }
     }
 
+    @Test("Capability callbacks are generation fenced")
+    func capabilityCallbacksAreGenerationFenced() async throws {
+        let result = try await BandConformanceRunner.run(
+            "stale_capability_callback_rejected"
+        )
+        #expect(result.failure == BandFailureCategory.staleCallback.rawValue)
+        #expect(result.finalState == BandSessionState.ready.rawValue)
+    }
+
+    @Test("Device time rejects negative samples and checkpoints")
+    func deviceTimeDomainIsNonnegative() async throws {
+        let result = try await BandConformanceRunner.run(
+            "invalid_device_time_rejected"
+        )
+        #expect(result.failure == BandFailureCategory.invalidInput.rawValue)
+
+        let checkpoint = BandHistoryCheckpoint(
+            sourceIdentity: "source",
+            acknowledgedCursor: nil,
+            lastHistoryComplete: nil,
+            durableSampleIdentities: [
+                BandSampleIdentity(
+                    stream: .heartRate,
+                    sequence: 1,
+                    deviceTimeMilliseconds: -1
+                ),
+            ]
+        )
+        #expect(throws: BandFailureCategory.invalidInput) {
+            try checkpoint.validate()
+        }
+    }
+
+    @Test("Each history operation requires its own durable receipt")
+    func historyOperationDurabilityIsNotInherited() async throws {
+        let result = try await BandConformanceRunner.run(
+            "history_operation_requires_own_receipt"
+        )
+        #expect(result.failure == BandFailureCategory.storage.rawValue)
+        #expect(result.events.last == "operation_cancelled")
+    }
+
+    @Test("Firmware lifecycle uses firmware diagnostics")
+    func firmwareDiagnosticsAreSpecific() async throws {
+        let result = try await BandConformanceRunner.run(
+            "firmware_diagnostics_specific"
+        )
+        #expect(result.events.last == "firmware_diagnostics_specific")
+    }
+
+    @Test("Incomplete history chunks must advance their cursor")
+    func incompleteHistoryRequiresCursorProgress() async throws {
+        let result = try await BandConformanceRunner.run(
+            "history_nonadvancing_cursor_rejected"
+        )
+        #expect(result.failure == BandFailureCategory.historyStalled.rawValue)
+    }
+
+    @Test("Bounded strings use UTF-8 byte length")
+    func boundedStringsUseUTF8Bytes() async throws {
+        let result = try await BandConformanceRunner.run(
+            "utf8_length_cross_platform"
+        )
+        #expect(result.failure == BandFailureCategory.invalidInput.rawValue)
+    }
+
+    @Test("Sampling requires a negotiated sensor capability")
+    func samplingRequiresSensorCapability() async throws {
+        let result = try await BandConformanceRunner.run(
+            "sampling_requires_sensor_capability"
+        )
+        #expect(result.failure == BandFailureCategory.unsupported.rawValue)
+    }
+
+    @Test("Recent durable identities remain bounded in memory")
+    func durableIdentityCacheRemainsBounded() async throws {
+        let result = try await BandConformanceRunner.run(
+            "durable_identity_cache_bounded"
+        )
+        #expect(result.events.contains("identity_cache_bounded"))
+        #expect(result.acceptedSamples == 2)
+    }
+
+    @Test("Active operations support cancellation and failure terminals")
+    func operationsHaveExplicitTerminals() async throws {
+        let result = try await BandConformanceRunner.run(
+            "operation_terminal_paths"
+        )
+        #expect(result.events.contains("operation_cancelled"))
+        #expect(result.events.contains("operation_failed"))
+        #expect(result.events.contains("disconnect_recovery"))
+        #expect(result.events.contains("stale_callback_rejected"))
+        #expect(result.events.last == "reconnected")
+        #expect(result.finalState == BandSessionState.ready.rawValue)
+    }
+
     @Test("Diagnostics are bounded and structurally identifier-free")
     func diagnosticsAreBoundedAndRedacted() async throws {
         let recorder = BandDiagnosticsRecorder(capacity: 2)
