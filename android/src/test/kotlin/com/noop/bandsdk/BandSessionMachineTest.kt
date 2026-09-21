@@ -84,6 +84,59 @@ class BandSessionMachineTest {
     }
 
     @Test
+    fun durableHistoryCheckpointRestores() {
+        val result = BandConformanceRunner.run("history_checkpoint_restored")
+        assertNull(result.failure)
+        assertEquals("cursor-3", result.acknowledgedCursor)
+        assertEquals(1, result.acceptedSamples)
+    }
+
+    @Test
+    fun firmwareEligibilityIsSpecific() {
+        val result = BandConformanceRunner.run("firmware_eligibility_specific")
+        assertEquals(
+            BandFailureCategory.UPDATE_NOT_ELIGIBLE.wireValue,
+            result.failure,
+        )
+    }
+
+    @Test
+    fun unnegotiatedStreamsFailClosed() {
+        val result = BandConformanceRunner.run("unnegotiated_stream_rejected")
+        assertEquals(BandFailureCategory.UNSUPPORTED.wireValue, result.failure)
+        assertEquals(0, result.acceptedSamples)
+    }
+
+    @Test
+    fun firmwareCannotOverlapLiveCollection() {
+        val result = BandConformanceRunner.run("firmware_blocked_during_live")
+        assertEquals(BandFailureCategory.BUSY.wireValue, result.failure)
+    }
+
+    @Test
+    fun historyStateRequiresDurableReceipt() {
+        val result = BandConformanceRunner.run(
+            "history_state_requires_durable_receipt",
+        )
+        assertEquals(
+            BandFailureCategory.HISTORY_STALLED.wireValue,
+            result.failure,
+        )
+        assertEquals("cursor-3", result.acknowledgedCursor)
+        assertTrue("receipt_rejected" in result.events)
+    }
+
+    @Test
+    fun maximumSignedSequenceIsAccepted() {
+        val sample = VirtualBandFixtures.liveBatch.samples.first().copy(
+            identity = VirtualBandFixtures.liveBatch.samples.first().identity.copy(
+                sequence = BandContractLimits.MAXIMUM_SAMPLE_SEQUENCE,
+            ),
+        )
+        sample.validate()
+    }
+
+    @Test
     fun negativeSequencesAreRejected() {
         val sample = VirtualBandFixtures.liveBatch.samples.first().copy(
             identity = VirtualBandFixtures.liveBatch.samples.first().identity.copy(

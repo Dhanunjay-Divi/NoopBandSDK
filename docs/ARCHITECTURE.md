@@ -49,6 +49,22 @@ has:
 - a bounded retry policy;
 - identifier-free diagnostics.
 
+Firmware update is additionally excluded while live collection is active. The
+collector must stop live delivery before requesting an update token.
+
+## Durable history
+
+The application persists a source-scoped history checkpoint containing the
+last acknowledged cursor, whether the last durable range was terminal, and a
+bounded recent identity set. A new process may restore that checkpoint only
+for the same source identity.
+
+History acceptance carries exact completion and circular-buffer overflow
+state. Cursor advancement requires a durable receipt that confirms those exact
+flags and confirms their metadata was committed. An incomplete range may
+advance to its next cursor after that commit, but the history operation cannot
+finish until a terminal chunk is durably acknowledged.
+
 ## Health and data boundary
 
 The SDK transfers measured or supplier-produced values with provenance. It

@@ -36,11 +36,20 @@ captures, health data, endpoints, or firmware.
 5. Route accepted neutral batches into the existing platform storage adapter.
    Live delivery never advances history. A history acknowledgment requires the
    exact durable receipt returned after app-store commit.
-6. Map SDK diagnostic events into the existing bounded app recorder without
+6. Persist the source-scoped history checkpoint after acknowledgment and seed a
+   replacement process with that cursor plus its bounded recent identity set.
+   Never restore one band's checkpoint into another source identity.
+7. Persist exact history `complete` and `overflowed` flags before setting
+   `historyStateCommitted` in a receipt. An incomplete range cannot complete
+   the SDK history operation.
+8. Map SDK diagnostic events into the existing bounded app recorder without
    adding identifiers, sample values, payloads, timestamps, URLs, or arbitrary
    exception text.
-7. Do not expose pairing, possession, haptic, alarm, wear, firmware, or sensor
+9. Do not expose pairing, possession, haptic, alarm, wear, firmware, or sensor
    capabilities until the exact supplier and physical gates pass.
+
+Sample sequences use the non-negative signed 64-bit range on both platforms.
+Adapters must reject supplier values outside `0 ... Int64.max`.
 
 ## Release sequence
 
