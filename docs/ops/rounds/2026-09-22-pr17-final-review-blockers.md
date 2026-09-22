@@ -5,7 +5,8 @@
 - State: `in progress`
 - Branch: `codex/sdk-pr17-final-blockers-20260922`
 - Start commit: `a486768efb873b57515926740d3efa19787de612`
-- Implementation commit: pending
+- Implementation commit:
+  `47b107be64c27027c10be1f295213609634562d5`
 - Protected merge and application repin: pending
 
 ## Objective

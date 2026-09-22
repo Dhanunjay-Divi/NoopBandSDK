@@ -13,7 +13,8 @@ Last updated: **2026-09-22**
   procedural, not enforced by a repository rule
 - Active branch: `codex/sdk-pr17-final-blockers-20260922`
 - Start commit: `a486768efb873b57515926740d3efa19787de612`
-- Implementation commit: pending
+- Implementation commit:
+  `47b107be64c27027c10be1f295213609634562d5`
 - PR merge: pending
 - Supplier binaries: absent and prohibited
 - WHOOP application transport: unchanged
