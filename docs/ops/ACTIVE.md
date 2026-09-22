@@ -4,13 +4,13 @@ Last updated: **2026-09-22**
 
 ## Current round
 
-- [PR 17 review follow-up](rounds/2026-09-22-pr17-review-followup.md)
+- [PR 17 final closeout](rounds/2026-09-22-pr17-final-closeout.md)
 
 ## Current boundary
 
 - Protected branch: `main`
-- Active branch: `codex/sdk-pr17-review-followup-20260922`
-- Start commit: `ee69f0d65d92cdf182ef514951464b5f260c21ae`
+- Active branch: `codex/sdk-pr17-final-closeout-20260922`
+- Start commit: `c254cb329963eb262d18c43ae6b25a8340fe77f6`
 - Implementation commit: current branch candidate
 - Evidence commit: current branch candidate
 - Protected merge: `277c628d5a1fd9e747871e777d908e41460802fa`
@@ -25,13 +25,25 @@ background execution, haptics, flash retention, battery, sensor accuracy,
 possession proof, or firmware update behavior.
 
 The current application review found three remaining deterministic SDK defects:
-oversized Kotlin callback collections can be fully copied before rejection,
-history staging uses the same completion outcome as durable acknowledgement,
-and fractional step counts are accepted. This round adds matched bounded
-behavior without changing runtime transport enablement.
+live and history persistence receipts may overlap, capability negotiation lacks
+explicit cancellation and failure terminals, and operation authentication
+failure does not invalidate authenticated session state. This round adds
+matched bounded behavior without changing runtime transport enablement.
 
 ## Current evidence
 
+- The PR 17 final-closeout branch serializes live/history durable acceptance,
+  adds explicit generation-fenced capability cancellation/failure terminals,
+  invalidates authenticated sessions on operation authentication failure, and
+  prevents cancellation, reconnect, restart, or close from discarding an
+  unresolved persistence receipt. Exact negative history receipts release the
+  reservation without advancing cursor or durable identity state.
+- Current local evidence: Swift 39/39, Kotlin/JVM 44/44 plus `installDist`,
+  35/35 shared Swift/Kotlin scenarios, and 47 repository files passing
+  language/binary/JSON gates. JSON and diff checks pass. Independent final
+  re-review found no remaining P0-P2 implementation defect. Protected SDK
+  review/merge, clean exports, application repin, and PR `#17` verification
+  remain pending.
 - Swift package: 33 tests pass.
 - Kotlin/JVM: 36 tests pass and the conformance distribution builds.
 - Shared contract: 33 Swift/Kotlin scenarios match the checked-in expected

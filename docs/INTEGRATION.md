@@ -75,18 +75,23 @@ The production adapter must preserve these distinct authorities:
    source artifacts.
 5. The adapter reports connection and authentication progress, success, or a
    categorized terminal with the generation captured when that attempt began.
-   The neutral session then enters capability negotiation. Stale connection,
-   authentication, and capability callbacks are rejected without changing the
-   replacement session.
+   The neutral session then enters capability negotiation, whose acceptance,
+   cancellation, and categorized failures are also explicit generation-fenced
+   terminals. Stale connection, authentication, and capability callbacks are
+   rejected without changing the replacement session.
 6. The app enables only negotiated streams and commands. Unsupported inputs
    remain missing, and firmware operations use their own diagnostics and cannot
    overlap live collection.
 7. Live samples are committed through the app storage boundary. History cursor
    progress occurs only after an exact durable receipt; each history operation
-   must receive its own terminal durable result.
+   must receive its own terminal durable result. Live and history acceptance
+   windows are serialized, and lifecycle terminals cannot discard an unresolved
+   persistence receipt. An exact negative receipt releases the reservation
+   without advancing durable identity or cursor state.
 8. Cancellation, timeout, disconnect, and supplier failure terminate the active
-   neutral operation explicitly. Reconnect creates a new generation and rejects
-   old callbacks.
+   neutral operation explicitly after pending persistence drains. Reconnect
+   creates a new generation and rejects old callbacks. Authentication failures
+   invalidate the authenticated generation before another command can begin.
 9. Collector handoff flushes accepted samples and checkpoints, releases the
    account lease, disconnects the old phone, and only then permits another
    authorized phone to collect.
