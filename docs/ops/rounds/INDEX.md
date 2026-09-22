@@ -1,5 +1,7 @@
 # NOOP Band SDK operations rounds
 
+- [2026-09-22 - PR 17 post-review lifecycle closeout](2026-09-22-pr17-post-review-lifecycle-closeout.md)
+- [2026-09-22 - PR 17 diagnostics closeout](2026-09-22-pr17-diagnostics-closeout.md)
 - [2026-09-22 - PR 17 open-review closeout](2026-09-22-pr17-open-review-closeout.md)
 - [2026-09-22 - PR 17 final closeout](2026-09-22-pr17-final-closeout.md)
 - [2026-09-22 - PR 17 review follow-up](2026-09-22-pr17-review-followup.md)

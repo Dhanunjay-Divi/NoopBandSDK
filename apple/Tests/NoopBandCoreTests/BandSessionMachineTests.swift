@@ -313,18 +313,26 @@ struct BandSessionMachineTests {
     func securityFailureRequiresReplacementSession() async throws {
         let session = BandSessionMachine()
         let generation = try await session.beginScan()
-        try await session.selectCandidate(
+        let connectionToken = try await session.selectCandidate(
             VirtualBandFixtures.candidate,
             callbackGeneration: generation
         )
-        try await session.beginConnection(callbackGeneration: generation)
-        try await session.beginAuthentication(callbackGeneration: generation)
+        try await session.beginConnection(
+            token: connectionToken,
+            callbackGeneration: generation
+        )
+        try await session.beginAuthentication(
+            token: connectionToken,
+            callbackGeneration: generation
+        )
         try await session.completeConnection(
             VirtualBandFixtures.identity,
+            token: connectionToken,
             callbackGeneration: generation
         )
         try await session.acceptCapabilities(
             VirtualBandFixtures.capabilities,
+            token: connectionToken,
             callbackGeneration: generation
         )
         let token = try await session.beginOperation(.battery)
@@ -508,10 +516,16 @@ struct BandSessionMachineTests {
     @Test("Capability negotiation has generation-fenced terminals")
     func capabilityNegotiationHasExplicitTerminals() async throws {
         let cancellationRecorder = BandDiagnosticsRecorder()
-        let (cancelledSession, cancelledGeneration) =
-            try await negotiatingSession(diagnostics: cancellationRecorder)
+        let (
+            cancelledSession,
+            cancelledGeneration,
+            cancelledConnectionToken
+        ) = try await negotiatingSessionWithToken(
+            diagnostics: cancellationRecorder
+        )
 
         try await cancelledSession.cancelCapabilities(
+            token: cancelledConnectionToken,
             callbackGeneration: cancelledGeneration
         )
         let cancelled = await cancelledSession.snapshot()
@@ -519,33 +533,39 @@ struct BandSessionMachineTests {
         #expect(cancelled.generation == cancelledGeneration + 1)
         await #expect(throws: BandFailureCategory.staleCallback) {
             try await cancelledSession.cancelCapabilities(
+                token: cancelledConnectionToken,
                 callbackGeneration: cancelledGeneration
             )
         }
         await #expect(throws: BandFailureCategory.staleCallback) {
             try await cancelledSession.failCapabilities(
                 .timeout,
+                token: cancelledConnectionToken,
                 callbackGeneration: cancelledGeneration
             )
         }
         let retryGeneration = try await cancelledSession.beginScan()
         #expect(retryGeneration == cancelled.generation + 1)
-        try await cancelledSession.selectCandidate(
+        let retryConnectionToken = try await cancelledSession.selectCandidate(
             VirtualBandFixtures.candidate,
             callbackGeneration: retryGeneration
         )
         try await cancelledSession.beginConnection(
+            token: retryConnectionToken,
             callbackGeneration: retryGeneration
         )
         try await cancelledSession.beginAuthentication(
+            token: retryConnectionToken,
             callbackGeneration: retryGeneration
         )
         try await cancelledSession.completeConnection(
             VirtualBandFixtures.identity,
+            token: retryConnectionToken,
             callbackGeneration: retryGeneration
         )
         await #expect(throws: BandFailureCategory.staleCallback) {
             try await cancelledSession.cancelCapabilities(
+                token: cancelledConnectionToken,
                 callbackGeneration: cancelledGeneration
             )
         }
@@ -563,10 +583,14 @@ struct BandSessionMachineTests {
         )
 
         let timeoutRecorder = BandDiagnosticsRecorder()
-        let (timedOutSession, timedOutGeneration) =
-            try await negotiatingSession(diagnostics: timeoutRecorder)
+        let (
+            timedOutSession,
+            timedOutGeneration,
+            timedOutConnectionToken
+        ) = try await negotiatingSessionWithToken(diagnostics: timeoutRecorder)
         try await timedOutSession.failCapabilities(
             .timeout,
+            token: timedOutConnectionToken,
             callbackGeneration: timedOutGeneration
         )
         let timedOut = await timedOutSession.snapshot()
@@ -581,11 +605,12 @@ struct BandSessionMachineTests {
             )
         )
 
-        let (invalidSession, invalidGeneration) =
-            try await negotiatingSession()
+        let (invalidSession, invalidGeneration, invalidConnectionToken) =
+            try await negotiatingSessionWithToken()
         await #expect(throws: BandFailureCategory.invalidInput) {
             try await invalidSession.failCapabilities(
                 .storage,
+                token: invalidConnectionToken,
                 callbackGeneration: invalidGeneration
             )
         }
@@ -593,26 +618,38 @@ struct BandSessionMachineTests {
         #expect(unchanged.state == .negotiatingCapabilities)
         #expect(unchanged.generation == invalidGeneration)
 
-        let (authenticationSession, authenticationGeneration) =
-            try await negotiatingSession()
+        let (
+            authenticationSession,
+            authenticationGeneration,
+            authenticationConnectionToken
+        ) = try await negotiatingSessionWithToken()
         try await authenticationSession.failCapabilities(
             .authentication,
+            token: authenticationConnectionToken,
             callbackGeneration: authenticationGeneration
         )
         #expect(await authenticationSession.snapshot().state == .rejected)
 
-        let (securitySession, securityGeneration) =
-            try await negotiatingSession()
+        let (
+            securitySession,
+            securityGeneration,
+            securityConnectionToken
+        ) = try await negotiatingSessionWithToken()
         try await securitySession.failCapabilities(
             .securityFailure,
+            token: securityConnectionToken,
             callbackGeneration: securityGeneration
         )
         #expect(await securitySession.snapshot().state == .securityFailure)
 
-        let (disconnectedSession, disconnectedGeneration) =
-            try await negotiatingSession()
+        let (
+            disconnectedSession,
+            disconnectedGeneration,
+            disconnectedConnectionToken
+        ) = try await negotiatingSessionWithToken()
         try await disconnectedSession.failCapabilities(
             .disconnected,
+            token: disconnectedConnectionToken,
             callbackGeneration: disconnectedGeneration
         )
         #expect(await disconnectedSession.snapshot().state == .recovering)
@@ -637,6 +674,167 @@ struct BandSessionMachineTests {
         }
         let retryGeneration = try await session.beginScan()
         #expect(retryGeneration == failed.generation + 1)
+    }
+
+    @Test("Operation token is revalidated after diagnostic suspension")
+    func operationTokenIsNotReturnedAfterInvalidation() async throws {
+        let recorder = BandDiagnosticsRecorder(capacity: 64)
+        let (session, _) = try await readySession(diagnostics: recorder)
+        await recorder.requestNextRecordSuspensionForTesting()
+
+        let beginTask = Task {
+            try await session.beginOperation(.battery)
+        }
+        await recorder.waitForRecordSuspensionForTesting()
+        try await session.close()
+        await recorder.resumeSuspendedRecordForTesting()
+
+        await #expect(throws: BandFailureCategory.staleCallback) {
+            _ = try await beginTask.value
+        }
+        let snapshot = await session.snapshot()
+        #expect(snapshot.state == .closed)
+        #expect(snapshot.activeOperation == nil)
+        let events = await recorder.snapshot()
+        #expect(
+            events.contains(
+                BandDiagnosticEvent(
+                    kind: .command,
+                    outcome: .stale,
+                    failureCategory: .staleCallback
+                )
+            )
+        )
+    }
+
+    @Test("Connection callbacks are bound to the selected candidate token")
+    func connectionCallbacksRejectForeignCandidateToken() async throws {
+        let session = BandSessionMachine()
+        let generation = try await session.beginScan()
+        let selectedToken = try await session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            callbackGeneration: generation
+        )
+        let foreignToken = BandConnectionToken(
+            sessionNonce: selectedToken.sessionNonce,
+            generation: selectedToken.generation,
+            sequence: selectedToken.sequence,
+            candidateHandle: "different-candidate"
+        )
+
+        await #expect(throws: BandFailureCategory.staleCallback) {
+            try await session.beginConnection(
+                token: foreignToken,
+                callbackGeneration: generation
+            )
+        }
+        #expect(await session.snapshot().state == .candidateSelected)
+        try await session.beginConnection(
+            token: selectedToken,
+            callbackGeneration: generation
+        )
+        #expect(await session.snapshot().state == .connecting)
+    }
+
+    @Test("Established authentication failures terminate ready and live sessions")
+    func establishedAuthenticationFailuresTerminateSession() async throws {
+        let readyRecorder = BandDiagnosticsRecorder()
+        let (readyFailureSession, readyGeneration) =
+            try await readySession(diagnostics: readyRecorder)
+        try await readyFailureSession.failEstablishedSession(
+            .authentication,
+            callbackGeneration: readyGeneration
+        )
+        let rejected = await readyFailureSession.snapshot()
+        #expect(rejected.state == .rejected)
+        #expect(rejected.generation == readyGeneration + 1)
+        #expect(
+            await readyRecorder.snapshot().last == BandDiagnosticEvent(
+                kind: .authentication,
+                outcome: .rejected,
+                failureCategory: .authentication
+            )
+        )
+
+        let liveRecorder = BandDiagnosticsRecorder()
+        let (liveFailureSession, liveGeneration) =
+            try await readySession(diagnostics: liveRecorder)
+        try await liveFailureSession.beginLive()
+        try await liveFailureSession.failEstablishedSession(
+            .securityFailure,
+            callbackGeneration: liveGeneration
+        )
+        let secured = await liveFailureSession.snapshot()
+        #expect(secured.state == .securityFailure)
+        #expect(secured.generation == liveGeneration + 1)
+        #expect(!secured.liveActive)
+
+        let (invalidFailureSession, invalidGeneration) = try await readySession()
+        await #expect(throws: BandFailureCategory.invalidInput) {
+            try await invalidFailureSession.failEstablishedSession(
+                .timeout,
+                callbackGeneration: invalidGeneration
+            )
+        }
+        #expect(await invalidFailureSession.snapshot().state == .ready)
+    }
+
+    @Test("Terminal history chunks preserve the last durable cursor")
+    func terminalHistoryChunkPreservesCursor() async throws {
+        let (session, generation) = try await readySession()
+        let store = VirtualBandStore()
+
+        let firstToken = try await session.beginOperation(.history)
+        let firstChunk = BandHistoryChunk(
+            chunkIdentity: "cursor-seed",
+            previousCursor: nil,
+            nextCursor: "cursor-2",
+            complete: false,
+            overflowed: false,
+            acknowledgementToken: "cursor-seed-ack",
+            batches: VirtualBandFixtures.historyChunk.batches
+        )
+        let firstAcceptance = try await session.stageHistoryChunk(
+            firstChunk,
+            token: firstToken,
+            callbackGeneration: generation
+        )
+        try await session.acknowledgeHistory(
+            receipt: await store.commit(acceptance: firstAcceptance),
+            token: firstToken,
+            callbackGeneration: generation
+        )
+        try await session.cancelOperation(firstToken)
+
+        let terminalToken = try await session.beginOperation(.history)
+        let terminalChunk = BandHistoryChunk(
+            chunkIdentity: "cursor-terminal",
+            previousCursor: "cursor-2",
+            nextCursor: nil,
+            complete: true,
+            overflowed: false,
+            acknowledgementToken: "cursor-terminal-ack",
+            batches: []
+        )
+        let terminalAcceptance = try await session.stageHistoryChunk(
+            terminalChunk,
+            token: terminalToken,
+            callbackGeneration: generation
+        )
+        #expect(terminalAcceptance.nextCursor == "cursor-2")
+        try await session.acknowledgeHistory(
+            receipt: await store.commit(acceptance: terminalAcceptance),
+            token: terminalToken,
+            callbackGeneration: generation
+        )
+        try await session.completeOperation(terminalToken)
+
+        #expect(
+            await session.snapshot().acknowledgedHistoryCursor == "cursor-2"
+        )
+        #expect(
+            await session.historyCheckpoint()?.acknowledgedCursor == "cursor-2"
+        )
     }
 
     @Test("Pending persistence blocks lifecycle terminals until drained")
@@ -1078,6 +1276,251 @@ struct BandSessionMachineTests {
         #expect(!text.contains("virtual-source"))
         #expect(!text.contains("72"))
         #expect(!text.contains("ack-1"))
+
+        let coalescingRecorder = BandDiagnosticsRecorder(capacity: 4)
+        await coalescingRecorder.recordCoalescingConsecutive(
+            BandDiagnosticEvent(
+                kind: .live,
+                outcome: .completed,
+                countBucket: .one
+            )
+        )
+        await coalescingRecorder.recordCoalescingConsecutive(
+            BandDiagnosticEvent(
+                kind: .live,
+                outcome: .completed,
+                countBucket: .overHundred
+            )
+        )
+        await coalescingRecorder.record(
+            BandDiagnosticEvent(
+                kind: .live,
+                outcome: .failed,
+                failureCategory: .storage
+            )
+        )
+        await coalescingRecorder.recordCoalescingConsecutive(
+            BandDiagnosticEvent(
+                kind: .live,
+                outcome: .completed,
+                countBucket: .one
+            )
+        )
+        let coalesced = await coalescingRecorder.snapshot()
+        #expect(coalesced.count == 3)
+        #expect(coalesced[0].countBucket == .overHundred)
+        #expect(coalesced[1].failureCategory == .storage)
+        #expect(coalesced[2].outcome == .completed)
+    }
+
+    @Test("Connection evidence survives sustained live persistence")
+    func liveReceiptDiagnosticsAreCoalesced() async throws {
+        let recorder = BandDiagnosticsRecorder(capacity: 16)
+        let (session, generation) = try await readySession(
+            diagnostics: recorder
+        )
+        try await session.beginLive()
+
+        for offset in 0..<130 {
+            let sample = BandSample(
+                identity: BandSampleIdentity(
+                    stream: .heartRate,
+                    sequence: UInt64(10_000 + offset),
+                    deviceTimeMilliseconds: Int64(10_000 + offset)
+                ),
+                value: 72,
+                unit: .beatsPerMinute,
+                quality: .accepted
+            )
+            let acceptance = try await session.stageLiveBatch(
+                BandSampleBatch(
+                    sourceIdentity:
+                        VirtualBandFixtures.identity.sourceIdentity,
+                    lane: .live,
+                    parserRevision: "parser-v1",
+                    calibrationRevision: "calibration-v1",
+                    samples: [sample]
+                ),
+                callbackGeneration: generation
+            )
+            try await session.acknowledgeLive(
+                receipt: DurableLiveReceipt(
+                    acceptance: acceptance,
+                    committedSamples: acceptance.acceptedSamples.count,
+                    committed: true
+                ),
+                callbackGeneration: generation
+            )
+        }
+        try await session.stopLive()
+
+        let events = await recorder.snapshot()
+        let connectionOutcomes = events
+            .filter { $0.kind == .connection }
+            .map(\.outcome)
+        #expect(connectionOutcomes == [.began, .completed])
+        let connectionCompletedIndex = try #require(
+            events.firstIndex {
+                $0.kind == .connection && $0.outcome == .completed
+            }
+        )
+        let authenticationBeganIndex = try #require(
+            events.firstIndex {
+                $0.kind == .authentication && $0.outcome == .began
+            }
+        )
+        #expect(connectionCompletedIndex < authenticationBeganIndex)
+        #expect(
+            events.filter {
+                $0.kind == .live && $0.outcome == .completed
+            }.count == 2
+        )
+
+        try await session.beginLive()
+        let restartAcceptance = try await session.stageLiveBatch(
+            BandSampleBatch(
+                sourceIdentity: VirtualBandFixtures.identity.sourceIdentity,
+                lane: .live,
+                parserRevision: "parser-v1",
+                calibrationRevision: "calibration-v1",
+                samples: [
+                    BandSample(
+                        identity: BandSampleIdentity(
+                            stream: .heartRate,
+                            sequence: 20_000,
+                            deviceTimeMilliseconds: 20_000
+                        ),
+                        value: 72,
+                        unit: .beatsPerMinute,
+                        quality: .accepted
+                    ),
+                ]
+            ),
+            callbackGeneration: generation
+        )
+        try await session.acknowledgeLive(
+            receipt: DurableLiveReceipt(
+                acceptance: restartAcceptance,
+                committedSamples: 1,
+                committed: true
+            ),
+            callbackGeneration: generation
+        )
+        try await session.stopLive()
+        let restartedEvents = await recorder.snapshot()
+        #expect(
+            restartedEvents.filter {
+                $0.kind == .live && $0.outcome == .completed
+            }.count == 4
+        )
+    }
+
+    @Test("Authentication begin is actor-reentrancy safe")
+    func authenticationBeginIsReentrancySafe() async throws {
+        let recorder = BandDiagnosticsRecorder(capacity: 64)
+        let session = BandSessionMachine(diagnostics: recorder)
+        let generation = try await session.beginScan()
+        let connectionToken = try await session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            callbackGeneration: generation
+        )
+        try await session.beginConnection(
+            token: connectionToken,
+            callbackGeneration: generation
+        )
+
+        let successes = await withTaskGroup(
+            of: Bool.self,
+            returning: Int.self
+        ) { group in
+            for _ in 0..<32 {
+                group.addTask {
+                    do {
+                        try await session.beginAuthentication(
+                            token: connectionToken,
+                            callbackGeneration: generation
+                        )
+                        return true
+                    } catch {
+                        return false
+                    }
+                }
+            }
+            var count = 0
+            for await success in group {
+                if success {
+                    count += 1
+                }
+            }
+            return count
+        }
+
+        #expect(successes == 1)
+        #expect(await session.snapshot().state == .authenticating)
+        let events = await recorder.snapshot()
+        #expect(
+            events.filter {
+                $0.kind == .connection && $0.outcome == .completed
+            }.count == 1
+        )
+        #expect(
+            events.filter {
+                $0.kind == .authentication && $0.outcome == .began
+            }.count == 1
+        )
+    }
+
+    @Test("Authentication transition diagnostics stay ordered")
+    func authenticationTransitionDiagnosticsStayOrdered() async throws {
+        let recorder = BandDiagnosticsRecorder(capacity: 64)
+        let session = BandSessionMachine(diagnostics: recorder)
+        let generation = try await session.beginScan()
+        let connectionToken = try await session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            callbackGeneration: generation
+        )
+        try await session.beginConnection(
+            token: connectionToken,
+            callbackGeneration: generation
+        )
+
+        let beginTask = Task {
+            try await session.beginAuthentication(
+                token: connectionToken,
+                callbackGeneration: generation
+            )
+        }
+        let completionTask = Task {
+            while await session.snapshot().state == .connecting {
+                await Task.yield()
+            }
+            try await session.completeConnection(
+                VirtualBandFixtures.identity,
+                token: connectionToken,
+                callbackGeneration: generation
+            )
+        }
+        try await beginTask.value
+        try await completionTask.value
+
+        let events = await recorder.snapshot()
+        let connectionCompleted = try #require(
+            events.firstIndex {
+                $0.kind == .connection && $0.outcome == .completed
+            }
+        )
+        let authenticationBegan = try #require(
+            events.firstIndex {
+                $0.kind == .authentication && $0.outcome == .began
+            }
+        )
+        let authenticationCompleted = try #require(
+            events.firstIndex {
+                $0.kind == .authentication && $0.outcome == .completed
+            }
+        )
+        #expect(connectionCompleted < authenticationBegan)
+        #expect(authenticationBegan < authenticationCompleted)
     }
 
     @Test("Unknown conformance scenarios fail closed")
@@ -1090,40 +1533,80 @@ struct BandSessionMachineTests {
     private func readySession(
         diagnostics: BandDiagnosticsRecorder = BandDiagnosticsRecorder()
     ) async throws -> (BandSessionMachine, UInt64) {
+        let (session, generation, _) = try await readySessionWithToken(
+            diagnostics: diagnostics
+        )
+        return (session, generation)
+    }
+
+    private func readySessionWithToken(
+        diagnostics: BandDiagnosticsRecorder = BandDiagnosticsRecorder()
+    ) async throws -> (
+        BandSessionMachine,
+        UInt64,
+        BandConnectionToken
+    ) {
         let session = BandSessionMachine(diagnostics: diagnostics)
         let generation = try await session.beginScan()
-        try await session.selectCandidate(
+        let connectionToken = try await session.selectCandidate(
             VirtualBandFixtures.candidate,
             callbackGeneration: generation
         )
-        try await session.beginConnection(callbackGeneration: generation)
-        try await session.beginAuthentication(callbackGeneration: generation)
+        try await session.beginConnection(
+            token: connectionToken,
+            callbackGeneration: generation
+        )
+        try await session.beginAuthentication(
+            token: connectionToken,
+            callbackGeneration: generation
+        )
         try await session.completeConnection(
             VirtualBandFixtures.identity,
+            token: connectionToken,
             callbackGeneration: generation
         )
         try await session.acceptCapabilities(
             VirtualBandFixtures.capabilities,
+            token: connectionToken,
             callbackGeneration: generation
         )
-        return (session, generation)
+        return (session, generation, connectionToken)
     }
 
     private func negotiatingSession(
         diagnostics: BandDiagnosticsRecorder = BandDiagnosticsRecorder()
     ) async throws -> (BandSessionMachine, UInt64) {
+        let (session, generation, _) =
+            try await negotiatingSessionWithToken(diagnostics: diagnostics)
+        return (session, generation)
+    }
+
+    private func negotiatingSessionWithToken(
+        diagnostics: BandDiagnosticsRecorder = BandDiagnosticsRecorder()
+    ) async throws -> (
+        BandSessionMachine,
+        UInt64,
+        BandConnectionToken
+    ) {
         let session = BandSessionMachine(diagnostics: diagnostics)
         let generation = try await session.beginScan()
-        try await session.selectCandidate(
+        let connectionToken = try await session.selectCandidate(
             VirtualBandFixtures.candidate,
             callbackGeneration: generation
         )
-        try await session.beginConnection(callbackGeneration: generation)
-        try await session.beginAuthentication(callbackGeneration: generation)
-        try await session.completeConnection(
-            VirtualBandFixtures.identity,
+        try await session.beginConnection(
+            token: connectionToken,
             callbackGeneration: generation
         )
-        return (session, generation)
+        try await session.beginAuthentication(
+            token: connectionToken,
+            callbackGeneration: generation
+        )
+        try await session.completeConnection(
+            VirtualBandFixtures.identity,
+            token: connectionToken,
+            callbackGeneration: generation
+        )
+        return (session, generation, connectionToken)
     }
 }
