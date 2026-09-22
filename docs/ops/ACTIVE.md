@@ -11,8 +11,8 @@ Last updated: **2026-09-22**
 - Protected branch: `main`
 - Active branch: `codex/sdk-final-review-remediation-20260922`
 - Start commit: `dab6072eb2b69b07ee34221dbb649a0119547246`
-- Implementation commit: pending
-- Evidence commit: pending
+- Implementation commit: `9234b0b6c2e3c10f5314ba9fe876d638e7df0f7a`
+- Evidence commit: current record commit
 - Protected merge: pending
 - Supplier binaries: absent and prohibited
 - WHOOP app transport: unchanged in the separate NOOP application repository
