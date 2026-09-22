@@ -323,6 +323,20 @@ class BandSessionMachineTest {
     }
 
     @Test
+    fun unrecoverableFirmwareFailureIsTerminal() {
+        val result = BandConformanceRunner.run("firmware_terminal_failure")
+        assertEquals(
+            BandSessionState.FIRMWARE_FAILURE.wireValue,
+            result.finalState,
+        )
+        assertEquals(
+            BandFailureCategory.INVALID_STATE.wireValue,
+            result.failure,
+        )
+        assertEquals("replacement_scan_started", result.events.last())
+    }
+
+    @Test
     fun incompleteHistoryRequiresCursorProgress() {
         val result = BandConformanceRunner.run(
             "history_nonadvancing_cursor_rejected",
@@ -1192,6 +1206,23 @@ class BandSessionMachineTest {
 
     @Test
     fun liveAndHistoryStreamsAreNegotiatedPerLane() {
+        val invalidRetention = assertFailsWith<BandException> {
+            VirtualBandFixtures.capabilities.copy(
+                historyDays = 0,
+                liveStreams = setOf(BandStreamKind.HEART_RATE),
+                historyStreams = setOf(BandStreamKind.HEART_RATE),
+            ).validate()
+        }
+        assertEquals(
+            BandFailureCategory.INCOMPATIBLE,
+            invalidRetention.category,
+        )
+        VirtualBandFixtures.capabilities.copy(
+            historyDays = 0,
+            liveStreams = setOf(BandStreamKind.HEART_RATE),
+            historyStreams = emptySet(),
+        ).validate()
+
         val historyOnly = VirtualBandFixtures.capabilities.copy(
             liveStreams = emptySet(),
             historyStreams = setOf(BandStreamKind.HEART_RATE),
@@ -1285,6 +1316,27 @@ class BandSessionMachineTest {
                 retainedRange = BandHistoryRange(
                     startDeviceTimeMilliseconds = 3_000,
                     endDeviceTimeMilliseconds = 2_000,
+                ),
+            ),
+            valid.copy(
+                firstLostRange = BandHistoryRange(
+                    startDeviceTimeMilliseconds = 1_500,
+                    endDeviceTimeMilliseconds = 2_000,
+                ),
+            ),
+            valid.copy(
+                firstLostRange = BandHistoryRange(
+                    startDeviceTimeMilliseconds = 3_001,
+                    endDeviceTimeMilliseconds = 3_500,
+                ),
+            ),
+            valid.copy(
+                batches = listOf(
+                    VirtualBandFixtures.historyChunk.batches.first().copy(
+                        samples = listOf(
+                            VirtualBandFixtures.liveBatch.samples.first(),
+                        ),
+                    ),
                 ),
             ),
         ).forEach { invalid ->

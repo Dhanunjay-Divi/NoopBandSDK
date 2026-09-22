@@ -260,6 +260,16 @@ struct BandSessionMachineTests {
         #expect(result.events.last == "firmware_diagnostics_specific")
     }
 
+    @Test("Unrecoverable firmware failure is terminal")
+    func unrecoverableFirmwareFailureIsTerminal() async throws {
+        let result = try await BandConformanceRunner.run(
+            "firmware_terminal_failure"
+        )
+        #expect(result.finalState == BandSessionState.firmwareFailure.rawValue)
+        #expect(result.failure == BandFailureCategory.invalidState.rawValue)
+        #expect(result.events.last == "replacement_scan_started")
+    }
+
     @Test("Incomplete history chunks must advance their cursor")
     func incompleteHistoryRequiresCursorProgress() async throws {
         let result = try await BandConformanceRunner.run(
@@ -861,6 +871,7 @@ struct BandSessionMachineTests {
     @Test("Live and history streams are negotiated per lane")
     func liveAndHistoryStreamsAreNegotiatedPerLane() async throws {
         func report(
+            historyDays: Int = VirtualBandFixtures.capabilities.historyDays,
             liveStreams: Set<BandStreamKind>,
             historyStreams: Set<BandStreamKind>
         ) -> BandCapabilityReport {
@@ -870,12 +881,25 @@ struct BandSessionMachineTests {
                 protocolVersion: base.protocolVersion,
                 hardwareRevision: base.hardwareRevision,
                 firmwareVersion: base.firmwareVersion,
-                historyDays: base.historyDays,
+                historyDays: historyDays,
                 capabilities: base.capabilities,
                 liveStreams: liveStreams,
                 historyStreams: historyStreams
             )
         }
+
+        #expect(throws: BandFailureCategory.incompatible) {
+            try report(
+                historyDays: 0,
+                liveStreams: [.heartRate],
+                historyStreams: [.heartRate]
+            ).validate()
+        }
+        try report(
+            historyDays: 0,
+            liveStreams: [.heartRate],
+            historyStreams: []
+        ).validate()
 
         func readySession(
             capabilities: BandCapabilityReport
@@ -974,7 +998,9 @@ struct BandSessionMachineTests {
         func chunk(
             overflowed: Bool = true,
             retainedRange: BandHistoryRange?,
-            firstLostRange: BandHistoryRange?
+            firstLostRange: BandHistoryRange?,
+            batches: [BandSampleBatch] =
+                VirtualBandFixtures.historyChunk.batches
         ) -> BandHistoryChunk {
             BandHistoryChunk(
                 chunkIdentity:
@@ -989,7 +1015,7 @@ struct BandSessionMachineTests {
                 firstLostRange: firstLostRange,
                 acknowledgementToken:
                     VirtualBandFixtures.historyChunk.acknowledgementToken,
-                batches: VirtualBandFixtures.historyChunk.batches
+                batches: batches
             )
         }
 
@@ -1022,6 +1048,34 @@ struct BandSessionMachineTests {
                     endDeviceTimeMilliseconds: 2_000
                 ),
                 firstLostRange: firstLost
+            ),
+            chunk(
+                retainedRange: retained,
+                firstLostRange: BandHistoryRange(
+                    startDeviceTimeMilliseconds: 1_500,
+                    endDeviceTimeMilliseconds: 2_000
+                )
+            ),
+            chunk(
+                retainedRange: retained,
+                firstLostRange: BandHistoryRange(
+                    startDeviceTimeMilliseconds: 3_001,
+                    endDeviceTimeMilliseconds: 3_500
+                )
+            ),
+            chunk(
+                retainedRange: retained,
+                firstLostRange: firstLost,
+                batches: [
+                    BandSampleBatch(
+                        sourceIdentity:
+                            VirtualBandFixtures.identity.sourceIdentity,
+                        lane: .history,
+                        parserRevision: "parser-v1",
+                        calibrationRevision: "calibration-v1",
+                        samples: [VirtualBandFixtures.liveBatch.samples[0]]
+                    ),
+                ]
             ),
         ]
         for invalid in invalidChunks {
