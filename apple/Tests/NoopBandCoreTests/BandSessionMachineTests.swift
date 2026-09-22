@@ -384,6 +384,96 @@ struct BandSessionMachineTests {
         try chunk.validate()
     }
 
+    @Test("History acceptance returns only rows storage may persist")
+    func historyAcceptanceReturnsExactPersistableRows() async throws {
+        let (session, generation) = try await readySession()
+        let store = VirtualBandStore()
+        let duplicate = try #require(
+            VirtualBandFixtures.liveBatch.samples.first
+        )
+        let fresh = BandSample(
+            identity: BandSampleIdentity(
+                stream: duplicate.identity.stream,
+                sequence: duplicate.identity.sequence + 100,
+                deviceTimeMilliseconds:
+                    duplicate.identity.deviceTimeMilliseconds + 1_000
+            ),
+            value: duplicate.value + 1,
+            unit: duplicate.unit,
+            quality: duplicate.quality
+        )
+        let secondFresh = BandSample(
+            identity: BandSampleIdentity(
+                stream: duplicate.identity.stream,
+                sequence: duplicate.identity.sequence + 101,
+                deviceTimeMilliseconds:
+                    duplicate.identity.deviceTimeMilliseconds + 2_000
+            ),
+            value: duplicate.value + 2,
+            unit: duplicate.unit,
+            quality: duplicate.quality
+        )
+        try await session.beginLive()
+        let liveAcceptance = try await session.stageLiveBatch(
+            VirtualBandFixtures.liveBatch,
+            callbackGeneration: generation
+        )
+        try await session.acknowledgeLive(
+            receipt: await store.commit(acceptance: liveAcceptance),
+            callbackGeneration: generation
+        )
+        try await session.stopLive()
+
+        let token = try await session.beginOperation(.history)
+        let sourceBatch = try #require(
+            VirtualBandFixtures.historyChunk.batches.first
+        )
+        let chunk = BandHistoryChunk(
+            chunkIdentity: VirtualBandFixtures.historyChunk.chunkIdentity,
+            previousCursor: VirtualBandFixtures.historyChunk.previousCursor,
+            nextCursor: VirtualBandFixtures.historyChunk.nextCursor,
+            complete: VirtualBandFixtures.historyChunk.complete,
+            overflowed: VirtualBandFixtures.historyChunk.overflowed,
+            acknowledgementToken:
+                VirtualBandFixtures.historyChunk.acknowledgementToken,
+            batches: [
+                BandSampleBatch(
+                    sourceIdentity: sourceBatch.sourceIdentity,
+                    lane: sourceBatch.lane,
+                    parserRevision: sourceBatch.parserRevision,
+                    calibrationRevision: sourceBatch.calibrationRevision,
+                    samples: [duplicate, fresh]
+                ),
+                BandSampleBatch(
+                    sourceIdentity: sourceBatch.sourceIdentity,
+                    lane: sourceBatch.lane,
+                    parserRevision: "parser-v2",
+                    calibrationRevision: "calibration-v2",
+                    samples: [fresh, secondFresh]
+                ),
+            ]
+        )
+        let acceptance = try await session.stageHistoryChunk(
+            chunk,
+            token: token,
+            callbackGeneration: generation
+        )
+
+        #expect(acceptance.acceptedSamples.map(\.sample) == [fresh, secondFresh])
+        #expect(acceptance.acceptedSamples[0].sourceIdentity
+            == sourceBatch.sourceIdentity)
+        #expect(acceptance.acceptedSamples[0].lane == sourceBatch.lane)
+        #expect(acceptance.acceptedSamples[0].parserRevision
+            == sourceBatch.parserRevision)
+        #expect(acceptance.acceptedSamples[0].calibrationRevision
+            == sourceBatch.calibrationRevision)
+        #expect(acceptance.acceptedSamples[1].parserRevision == "parser-v2")
+        #expect(acceptance.acceptedSamples[1].calibrationRevision
+            == "calibration-v2")
+        #expect(acceptance.duplicateSamples == 2)
+        #expect(await store.commit(acceptance: acceptance).committedSamples == 2)
+    }
+
     @Test("Connection completion callbacks are generation fenced")
     func connectionCallbacksAreGenerationFenced() async throws {
         let result = try await BandConformanceRunner.run(
@@ -625,7 +715,7 @@ struct BandSessionMachineTests {
             receipt: DurableHistoryReceipt(
                 acceptance: historyAcceptance,
                 historyStateCommitted: true,
-                committedSamples: historyAcceptance.acceptedSamples,
+                committedSamples: historyAcceptance.acceptedSamples.count,
                 committed: true
             ),
             token: historyToken,
@@ -722,7 +812,7 @@ struct BandSessionMachineTests {
             token: liveFirstHistoryToken,
             callbackGeneration: liveGeneration
         )
-        #expect(historyAfterLive.acceptedSamples == 0)
+        #expect(historyAfterLive.acceptedSamples.isEmpty)
         #expect(historyAfterLive.duplicateSamples == 1)
         try await liveFirst.acknowledgeHistory(
             receipt: DurableHistoryReceipt(
@@ -755,7 +845,7 @@ struct BandSessionMachineTests {
             receipt: DurableHistoryReceipt(
                 acceptance: historyAcceptance,
                 historyStateCommitted: true,
-                committedSamples: historyAcceptance.acceptedSamples,
+                committedSamples: historyAcceptance.acceptedSamples.count,
                 committed: true
             ),
             token: historyFirstToken,
@@ -834,7 +924,7 @@ struct BandSessionMachineTests {
         let receipt = DurableHistoryReceipt(
             acceptance: acceptance,
             historyStateCommitted: true,
-            committedSamples: acceptance.acceptedSamples,
+            committedSamples: acceptance.acceptedSamples.count,
             committed: true
         )
 
@@ -914,7 +1004,7 @@ struct BandSessionMachineTests {
             receipt: DurableHistoryReceipt(
                 acceptance: acceptance,
                 historyStateCommitted: true,
-                committedSamples: acceptance.acceptedSamples,
+                committedSamples: acceptance.acceptedSamples.count,
                 committed: true
             ),
             token: token,
@@ -951,7 +1041,7 @@ struct BandSessionMachineTests {
             receipt: DurableHistoryReceipt(
                 acceptance: cancellationAcceptance,
                 historyStateCommitted: true,
-                committedSamples: cancellationAcceptance.acceptedSamples,
+                committedSamples: cancellationAcceptance.acceptedSamples.count,
                 committed: true
             ),
             token: cancellationToken,
