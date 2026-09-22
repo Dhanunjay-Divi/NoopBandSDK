@@ -2,10 +2,12 @@
 
 ## Status
 
-- State: `local implementation, verification, and independent review complete`
+- State: `local implementation, verification, independent review, and PR publication complete`
 - Branch: `codex/sdk-pr17-diagnostics-closeout-20260922`
 - Start commit: `8fb464471fdd4ae09d5750feedcc25d50bdb1c20`
-- Implementation commit: pending
+- Implementation commit:
+  `432c0d59ec76e6fa250f813d660e1ad86cce7c16`
+- Pull request: `#14`
 - Protected merge: pending
 - Clean export and NOOP application repin: pending
 
@@ -79,7 +81,7 @@ recorded.
 
 ## Remaining gates
 
-- Commit, push, protected SDK pull request review, and protected merge.
+- Normal SDK pull request merge and protected-source verification.
 - Produce two byte-identical clean exports from the protected merge.
 - Repin and verify the NOOP application artifact before resolving the matching
   application review threads.
