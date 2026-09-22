@@ -11,8 +11,8 @@ Last updated: **2026-09-22**
 - Protected branch: `main`
 - Active branch: `codex/sdk-pr17-late-review-20260922`
 - Start commit: `78c17cbd495353f33b5ef169bd1200ee9a0c35df`
-- Implementation commit: local candidate pending commit
-- Evidence commit: pending
+- Implementation commit: `bc778da67ede2f32897f0dd2851880ef15b7a947`
+- Evidence commit: current record commit
 - Protected merge: `78c17cbd495353f33b5ef169bd1200ee9a0c35df`
 - Supplier binaries: absent and prohibited
 - WHOOP app transport: unchanged in the separate NOOP application repository

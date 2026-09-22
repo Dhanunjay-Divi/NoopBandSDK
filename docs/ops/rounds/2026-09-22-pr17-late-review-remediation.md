@@ -5,7 +5,7 @@
 - State: `ready for protected review`
 - Branch: `codex/sdk-pr17-late-review-20260922`
 - Start commit: `78c17cbd495353f33b5ef169bd1200ee9a0c35df`
-- Implementation commit: pending
+- Implementation commit: `bc778da67ede2f32897f0dd2851880ef15b7a947`
 - Protected merge: pending
 - Clean export and NOOP application repin: pending
 
