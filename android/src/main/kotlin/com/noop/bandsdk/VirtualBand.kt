@@ -213,7 +213,6 @@ object BandConformanceRunner {
         "happy_path",
         "single_command_queue",
         "stale_callback_rejected",
-        "live_callback_session_bound",
         "cross_session_credentials_rejected",
         "same_session_replay_rejected",
         "stale_terminal_callbacks_rejected",
@@ -246,6 +245,7 @@ object BandConformanceRunner {
         "history_pending_busy_diagnostics",
         "diagnostics_bounded",
         "fractional_steps_rejected",
+        "live_callback_session_bound",
         "close_active_phase_terminal",
         "closed_session_terminal",
     )
@@ -254,7 +254,6 @@ object BandConformanceRunner {
         "happy_path" -> happyPath()
         "single_command_queue" -> singleCommandQueue()
         "stale_callback_rejected" -> staleCallbackRejected()
-        "live_callback_session_bound" -> liveCallbackSessionBound()
         "cross_session_credentials_rejected" ->
             crossSessionCredentialsRejected()
         "same_session_replay_rejected" ->
@@ -297,6 +296,7 @@ object BandConformanceRunner {
             historyPendingBusyDiagnostics()
         "fractional_steps_rejected" -> fractionalStepsRejected()
         "diagnostics_bounded" -> diagnosticsBounded()
+        "live_callback_session_bound" -> liveCallbackSessionBound()
         "close_active_phase_terminal" -> closeActivePhaseTerminal()
         "closed_session_terminal" -> closedSessionTerminal()
         else -> fail(BandFailureCategory.INVALID_INPUT)
