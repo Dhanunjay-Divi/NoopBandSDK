@@ -11,8 +11,8 @@ Last updated: **2026-09-22**
 - Protected branch: `main`
 - Active branch: `codex/sdk-security-terminal-20260922`
 - Start commit: `44559aeb4b1b50af9e6ab8b8dc786f87821c72d9`
-- Implementation commit: pending
-- Evidence commit: pending
+- Implementation commit: `dbd2a3d40b124042ca089baa95be54fcc82f85d5`
+- Evidence commit: current record commit
 - Protected merge: `44559aeb4b1b50af9e6ab8b8dc786f87821c72d9`
 - Supplier binaries: absent and prohibited
 - WHOOP app transport: unchanged in the separate NOOP application repository
