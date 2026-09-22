@@ -4,15 +4,14 @@ Last updated: **2026-09-22**
 
 ## Current round
 
-- [PR 17 final contract closeout](rounds/2026-09-22-pr17-final-contract-closeout.md)
+- [PR 17 overflow, firmware, and capability closeout](rounds/2026-09-22-pr17-overflow-firmware-capability-closeout.md)
 
 ## Current boundary
 
 - Protected branch: `main`
-- Active branch: `codex/sdk-pr17-final-followup-20260922`
-- Start commit: `7794bae631c1704e18ae5c341fbc32e89c9dc647`
-- Implementation commit:
-  `b0de1f7efa759b20e09936f60dc743880f877d8c`
+- Active branch: `codex/sdk-pr17-overflow-firmware-closeout-20260922`
+- Start commit: `a8f94b5cbda329eaf7793c5a2cece94fb568acc0`
+- Implementation commit: pending
 - Protected merge: pending
 - Supplier binaries: absent and prohibited
 - WHOOP application transport: unchanged
@@ -43,14 +42,22 @@ possession proof, firmware flashing, or OTA behavior.
   persistence on established-session failure, separates live and history
   stream support, and binds retained/lost overflow ranges to the exact durable
   receipt.
+- The active follow-up validates overflow chronology and retained sample
+  bounds, adds an explicit terminal firmware-failure disposition, and rejects
+  history-stream capability reports with zero retention.
+- The follow-up's schema gate now traverses every current subschema
+  independently of fixtures, rejects unsupported future keywords, and enforces
+  the normative UTF-8 byte limits. Final independent review found no remaining
+  P0-P2 issue.
 
 ## Current evidence
 
-- Swift package: 51/51 tests passed.
-- Kotlin/JVM: 55/55 tests passed; `installDist` built successfully.
-- Repository gate: 51 files passed language, binary, JSON, and workflow policy.
+- Swift package: 52/52 tests passed.
+- Kotlin/JVM: 56/56 tests passed; `installDist` built successfully.
+- Repository gate: 52 files passed language, binary, JSON, capability-schema,
+  and workflow policy.
 - JSON validation, bounded secret-pattern scan, and `git diff --check`: passed.
-- Shared conformance: 35/35 Swift/Kotlin scenarios matched.
+- Shared conformance: 36/36 Swift/Kotlin scenarios matched.
 - First independent review found one P1 Swift actor-reentrancy issue and two P2
   evidence/documentation issues. The implementation and active handoff were
   corrected. Independent review of that exact corrected diff found no
@@ -60,8 +67,9 @@ possession proof, firmware flashing, or OTA behavior.
 
 ## Next ordered actions
 
-1. Commit, push once, open a protected SDK pull request, and merge normally.
-2. Produce two byte-identical clean source exports from the protected merge.
-3. Repin NOOP application PR `#17`, rerun its local artifact/app gates, push
+1. Implement and verify the active follow-up.
+2. Commit, push once, open a protected SDK pull request, and merge normally.
+3. Produce two byte-identical clean source exports from the protected merge.
+4. Repin NOOP application PR `#17`, rerun its local artifact/app gates, push
    once, and require the final protected hosted checks.
-4. Keep supplier/physical-device gates explicit and separate.
+5. Keep supplier/physical-device gates explicit and separate.

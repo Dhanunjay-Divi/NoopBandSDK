@@ -1,5 +1,6 @@
 # NOOP Band SDK operations rounds
 
+- [2026-09-22 - PR 17 overflow, firmware, and capability closeout](2026-09-22-pr17-overflow-firmware-capability-closeout.md)
 - [2026-09-22 - PR 17 final contract closeout](2026-09-22-pr17-final-contract-closeout.md)
 - [2026-09-22 - PR 17 post-review lifecycle closeout](2026-09-22-pr17-post-review-lifecycle-closeout.md)
 - [2026-09-22 - PR 17 diagnostics closeout](2026-09-22-pr17-diagnostics-closeout.md)
