@@ -278,6 +278,48 @@ struct BandSessionMachineTests {
         #expect(result.finalState == BandSessionState.ready.rawValue)
     }
 
+    @Test("Connection completion callbacks are generation fenced")
+    func connectionCallbacksAreGenerationFenced() async throws {
+        let result = try await BandConformanceRunner.run(
+            "connection_callbacks_generation_fenced"
+        )
+        #expect(result.failure == BandFailureCategory.staleCallback.rawValue)
+        #expect(result.events.contains("connection_failed"))
+        #expect(result.events.contains("stale_cancel_rejected"))
+        #expect(result.events.contains("stale_failure_rejected"))
+        #expect(result.events.contains("stale_terminals_preserved_state"))
+        #expect(result.events.contains("stale_connection_rejected"))
+        #expect(result.events.contains("stale_phases_preserved"))
+        #expect(result.events.contains("connection_diagnostics_bounded"))
+        #expect(result.finalState == BandSessionState.ready.rawValue)
+    }
+
+    @Test("Connection and authentication have explicit terminals")
+    func connectionAndAuthenticationHaveExplicitTerminals() async throws {
+        let result = try await BandConformanceRunner.run(
+            "connection_terminal_paths"
+        )
+        #expect(result.failure == BandFailureCategory.securityFailure.rawValue)
+        #expect(result.events.contains("connection_cancelled"))
+        #expect(result.events.contains("authentication_rejected"))
+        #expect(result.events.contains("security_failure"))
+        #expect(result.events.contains("connection_recovered"))
+        #expect(result.events.contains("connection_diagnostics_bounded"))
+        #expect(result.finalState == BandSessionState.ready.rawValue)
+    }
+
+    @Test("Pending history rejection records a bounded busy event")
+    func pendingHistoryRecordsBusyDiagnostics() async throws {
+        let result = try await BandConformanceRunner.run(
+            "history_pending_busy_diagnostics"
+        )
+        #expect(result.failure == BandFailureCategory.busy.rawValue)
+        #expect(result.events.contains("second_chunk_rejected"))
+        #expect(result.events.contains("history_busy_recorded"))
+        #expect(result.events.last == "operation_cancelled")
+        #expect(result.finalState == BandSessionState.ready.rawValue)
+    }
+
     @Test("Diagnostics are bounded and structurally identifier-free")
     func diagnosticsAreBoundedAndRedacted() async throws {
         let recorder = BandDiagnosticsRecorder(capacity: 2)
