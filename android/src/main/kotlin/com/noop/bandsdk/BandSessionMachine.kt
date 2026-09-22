@@ -936,7 +936,7 @@ class BandSessionMachine(
         diagnostics.record(
             BandDiagnosticEvent(
                 BandDiagnosticKind.HISTORY,
-                BandDiagnosticOutcome.COMPLETED,
+                BandDiagnosticOutcome.STAGED,
                 BandCountBucket.from(unique.size),
             ),
         )

@@ -26,6 +26,20 @@ class BandSessionMachineTest {
         }
     }
 
+    private class IterationForbiddenList<T>(
+        override val size: Int,
+    ) : AbstractList<T>() {
+        var iterationAttempted = false
+
+        override fun get(index: Int): T =
+            error("bounded snapshot must reject before indexed access")
+
+        override fun iterator(): Iterator<T> {
+            iterationAttempted = true
+            error("bounded snapshot must reject before iteration")
+        }
+    }
+
     @Test
     fun deterministicScenariosAreStable() {
         BandConformanceRunner.automatedScenarios.forEach { scenario ->
@@ -424,6 +438,81 @@ class BandSessionMachineTest {
     }
 
     @Test
+    fun oversizedSnapshotsRejectBeforeUnboundedTraversal() {
+        val oversizedSamples = IterationForbiddenList<BandSample>(
+            BandContractLimits.SAMPLES_PER_BATCH + 1,
+        )
+        val batch = VirtualBandFixtures.liveBatch.copy(
+            samples = oversizedSamples,
+        )
+        val batchError = assertFailsWith<BandException> {
+            batch.immutableSnapshot()
+        }
+        assertEquals(BandFailureCategory.INVALID_INPUT, batchError.category)
+        assertFalse(oversizedSamples.iterationAttempted)
+
+        val oversizedBatches = IterationForbiddenList<BandSampleBatch>(
+            BandContractLimits.BATCHES_PER_HISTORY_CHUNK + 1,
+        )
+        val chunk = VirtualBandFixtures.historyChunk.copy(
+            batches = oversizedBatches,
+        )
+        val chunkError = assertFailsWith<BandException> {
+            chunk.immutableSnapshot()
+        }
+        assertEquals(BandFailureCategory.INVALID_INPUT, chunkError.category)
+        assertFalse(oversizedBatches.iterationAttempted)
+
+        val sample = VirtualBandFixtures.historyChunk.batches
+            .first().samples.first()
+        val fullBatch = VirtualBandFixtures.historyChunk.batches.first().copy(
+            samples = List(BandContractLimits.SAMPLES_PER_BATCH) { sample },
+        )
+        val excessSamples = IterationForbiddenList<BandSample>(1)
+        val excessBatch = fullBatch.copy(samples = excessSamples)
+        val totalOverflow = VirtualBandFixtures.historyChunk.copy(
+            batches = List(
+                BandContractLimits.SAMPLES_PER_HISTORY_CHUNK /
+                    BandContractLimits.SAMPLES_PER_BATCH,
+            ) { fullBatch } + excessBatch,
+        )
+        val totalError = assertFailsWith<BandException> {
+            totalOverflow.immutableSnapshot()
+        }
+        assertEquals(BandFailureCategory.INVALID_INPUT, totalError.category)
+        assertFalse(excessSamples.iterationAttempted)
+    }
+
+    @Test
+    fun stepSamplesRequireIntegralCounts() {
+        val identity = BandSampleIdentity(
+            stream = BandStreamKind.STEPS,
+            sequence = 1,
+            deviceTimeMilliseconds = 1,
+        )
+        listOf(0.0, 1.0, 1_000_000.0).forEach { value ->
+            BandSample(
+                identity = identity,
+                value = value,
+                unit = BandUnit.COUNT,
+                quality = BandSampleQuality.ACCEPTED,
+            ).validate()
+        }
+
+        listOf(0.5, 1.5, 999_999.5).forEach { value ->
+            val error = assertFailsWith<BandException> {
+                BandSample(
+                    identity = identity,
+                    value = value,
+                    unit = BandUnit.COUNT,
+                    quality = BandSampleQuality.ACCEPTED,
+                ).validate()
+            }
+            assertEquals(BandFailureCategory.INVALID_INPUT, error.category)
+        }
+    }
+
+    @Test
     fun connectionCompletionCallbacksAreGenerationFenced() {
         val result = BandConformanceRunner.run(
             "connection_callbacks_generation_fenced",
@@ -588,6 +677,77 @@ class BandSessionMachineTest {
 
         session.acknowledgeHistory(receipt, activeToken, generation)
         session.completeOperation(activeToken)
+    }
+
+    @Test
+    fun historyDiagnosticsDistinguishStagingFromDurableCompletion() {
+        val recorder = BandDiagnosticsRecorder()
+        val (session, generation) = readySession(recorder)
+        val token = session.beginOperation(BandOperationClass.HISTORY)
+
+        val acceptance = session.stageHistoryChunk(
+            VirtualBandFixtures.historyChunk,
+            token,
+            generation,
+        )
+        var events = recorder.snapshot()
+        var event = events.last()
+        assertEquals(BandDiagnosticKind.HISTORY, event.kind)
+        assertEquals(BandDiagnosticOutcome.STAGED, event.outcome)
+        assertTrue(
+            events.indexOfLast {
+                it.kind == BandDiagnosticKind.HISTORY &&
+                    it.outcome == BandDiagnosticOutcome.BEGAN
+            } <
+                events.indexOfLast {
+                    it.kind == BandDiagnosticKind.HISTORY &&
+                        it.outcome == BandDiagnosticOutcome.STAGED
+                },
+        )
+
+        session.acknowledgeHistory(
+            DurableHistoryReceipt(
+                acceptance = acceptance,
+                historyStateCommitted = true,
+                committedSamples = acceptance.acceptedSamples,
+                committed = true,
+            ),
+            token,
+            generation,
+        )
+        events = recorder.snapshot()
+        event = events.last()
+        assertEquals(BandDiagnosticKind.HISTORY, event.kind)
+        assertEquals(BandDiagnosticOutcome.COMPLETED, event.outcome)
+        assertTrue(
+            events.indexOfLast {
+                it.kind == BandDiagnosticKind.HISTORY &&
+                    it.outcome == BandDiagnosticOutcome.STAGED
+            } <
+                events.indexOfLast {
+                    it.kind == BandDiagnosticKind.HISTORY &&
+                        it.outcome == BandDiagnosticOutcome.COMPLETED
+                },
+        )
+        session.completeOperation(token)
+
+        val cancellationRecorder = BandDiagnosticsRecorder()
+        val (cancellationSession, cancellationGeneration) =
+            readySession(cancellationRecorder)
+        val cancellationToken =
+            cancellationSession.beginOperation(BandOperationClass.HISTORY)
+        cancellationSession.stageHistoryChunk(
+            VirtualBandFixtures.historyChunk,
+            cancellationToken,
+            cancellationGeneration,
+        )
+        cancellationSession.cancelOperation(cancellationToken)
+        assertFalse(
+            cancellationRecorder.snapshot().any {
+                it.kind == BandDiagnosticKind.HISTORY &&
+                    it.outcome == BandDiagnosticOutcome.COMPLETED
+            },
+        )
     }
 
     @Test

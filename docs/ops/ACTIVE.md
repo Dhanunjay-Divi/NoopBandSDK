@@ -4,13 +4,13 @@ Last updated: **2026-09-22**
 
 ## Current round
 
-- [History token observability](rounds/2026-09-22-history-token-observability.md)
+- [PR 17 final remediation](rounds/2026-09-22-pr17-final-remediation.md)
 
 ## Current boundary
 
 - Protected branch: `main`
-- Active branch: `codex/sdk-history-observability-20260922`
-- Start commit: `277c628d5a1fd9e747871e777d908e41460802fa`
+- Active branch: `codex/sdk-pr17-final-remediation-20260922`
+- Start commit: `55fdd891fb3e9c4adf610e2b38a21b0adc3fa237`
 - Implementation commit: current branch candidate
 - Evidence commit: current branch candidate
 - Protected merge: `277c628d5a1fd9e747871e777d908e41460802fa`
@@ -24,11 +24,11 @@ The round may prove only deterministic software contracts. It cannot prove BLE,
 background execution, haptics, flash retention, battery, sensor accuracy,
 possession proof, or firmware update behavior.
 
-The current application review found one remaining deterministic SDK
-observability gap: stale or foreign history operation tokens fail closed before
-the history lane records a bounded rejection. This round adds matched Apple and
-Kotlin evidence without changing authorization, payload handling, or runtime
-transport enablement.
+The current application review found three remaining deterministic SDK defects:
+oversized Kotlin callback collections can be fully copied before rejection,
+history staging uses the same completion outcome as durable acknowledgement,
+and fractional step counts are accepted. This round adds matched bounded
+behavior without changing runtime transport enablement.
 
 ## Current evidence
 
