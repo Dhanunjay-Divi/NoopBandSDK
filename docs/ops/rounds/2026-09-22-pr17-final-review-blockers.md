@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `in progress`
+- State: `verified PR candidate`
 - Branch: `codex/sdk-pr17-final-blockers-20260922`
 - Start commit: `a486768efb873b57515926740d3efa19787de612`
 - Implementation commit:
@@ -112,7 +112,10 @@ the exact NOOP application PR `#17` artifact:
   concurrency, resource monitoring, and process-group cleanup. The live
   resource probe remained at 61-62% free system memory; no simulator or Gradle
   process remained after either wall.
-- Independent exact-diff review: in progress.
+- Independent exact-diff review could not complete in the available agent
+  environment. The first reviewer lost AWS credentials before reading the
+  diff; the second remained non-responsive through repeated live waits and was
+  closed without output. No independent finding is claimed.
 - Local exact-diff review found no remaining P1/P2 issue. It specifically
   checked source compatibility, opaque token construction, cross-session
   authority, terminal-state preservation, fixed-category diagnostics, and

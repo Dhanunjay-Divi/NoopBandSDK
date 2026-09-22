@@ -74,7 +74,9 @@ possession proof, firmware flashing, or OTA behavior.
 - Swift parsing, JSON validation, bounded secret-pattern scan, and
   `git diff --check`: passed.
 - Local exact-diff review found no remaining P1/P2 issue.
-- Independent exact-diff review: in progress.
+- Independent agent review unavailable: one reviewer lost AWS credentials and
+  one produced no output before controlled shutdown. No independent result is
+  claimed.
 - First independent review found one P1 Swift actor-reentrancy issue and two P2
   evidence/documentation issues. The implementation and active handoff were
   corrected. Independent review of that exact corrected diff found no
@@ -84,11 +86,10 @@ possession proof, firmware flashing, or OTA behavior.
 
 ## Next ordered actions
 
-1. Finish the independent exact-diff review and correct any confirmed issue.
-2. Commit the verified SDK candidate and push once to a PR. Do not claim hosted
+1. Push the verified SDK candidate once to a PR. Do not claim hosted
    checks: this repository intentionally has no hosted workflow.
-3. Merge normally through the PR and produce two
+2. Merge normally through the PR and produce two
    byte-identical clean source exports.
-4. Repin NOOP application PR `#17`, rerun local artifact/app gates, push once,
+3. Repin NOOP application PR `#17`, rerun local artifact/app gates, push once,
    and require final protected hosted checks.
-5. Keep supplier and physical-device gates explicit and separate.
+4. Keep supplier and physical-device gates explicit and separate.
