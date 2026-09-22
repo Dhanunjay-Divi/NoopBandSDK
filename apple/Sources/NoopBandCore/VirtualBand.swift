@@ -511,6 +511,7 @@ public enum BandConformanceRunner {
         let (session, oldGeneration, _) =
             try await readySessionWithToken()
         var events = ["ready"]
+        let staleLiveToken = try await session.beginLive()
         let reconnectGeneration = try await session.interruptForReconnect(
             callbackGeneration: oldGeneration
         )
@@ -522,11 +523,7 @@ public enum BandConformanceRunner {
         do {
             _ = try await session.durablyCommitLiveBatch(
                 VirtualBandFixtures.liveBatch,
-                token: BandLiveToken(
-                    sessionNonce: UUID(),
-                    generation: oldGeneration,
-                    sequence: 0
-                ),
+                token: staleLiveToken,
                 callbackGeneration: oldGeneration
             )
         } catch let error as BandFailureCategory {
