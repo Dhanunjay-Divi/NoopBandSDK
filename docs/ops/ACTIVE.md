@@ -4,13 +4,13 @@ Last updated: **2026-09-22**
 
 ## Current round
 
-- [PR 17 final remediation](rounds/2026-09-22-pr17-final-remediation.md)
+- [PR 17 review follow-up](rounds/2026-09-22-pr17-review-followup.md)
 
 ## Current boundary
 
 - Protected branch: `main`
-- Active branch: `codex/sdk-pr17-final-remediation-20260922`
-- Start commit: `55fdd891fb3e9c4adf610e2b38a21b0adc3fa237`
+- Active branch: `codex/sdk-pr17-review-followup-20260922`
+- Start commit: `ee69f0d65d92cdf182ef514951464b5f260c21ae`
 - Implementation commit: current branch candidate
 - Evidence commit: current branch candidate
 - Protected merge: `277c628d5a1fd9e747871e777d908e41460802fa`

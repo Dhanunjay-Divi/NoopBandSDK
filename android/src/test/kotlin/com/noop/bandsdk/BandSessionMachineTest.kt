@@ -40,6 +40,25 @@ class BandSessionMachineTest {
         }
     }
 
+    private class MisreportedList<T>(
+        private val values: List<T>,
+        override val size: Int,
+    ) : AbstractList<T>() {
+        override fun get(index: Int): T = values[index]
+        override fun iterator(): Iterator<T> = values.iterator()
+    }
+
+    private class TraversalFailureList<T>(
+        private val value: T,
+    ) : AbstractList<T>() {
+        override val size: Int = 1
+        override fun get(index: Int): T = value
+        override fun iterator(): Iterator<T> = object : Iterator<T> {
+            override fun hasNext(): Boolean = true
+            override fun next(): T = throw ConcurrentModificationException()
+        }
+    }
+
     @Test
     fun deterministicScenariosAreStable() {
         BandConformanceRunner.automatedScenarios.forEach { scenario ->
@@ -481,6 +500,99 @@ class BandSessionMachineTest {
         }
         assertEquals(BandFailureCategory.INVALID_INPUT, totalError.category)
         assertFalse(excessSamples.iterationAttempted)
+
+        val traversalOverflow = MisreportedList(
+            values = List(BandContractLimits.SAMPLES_PER_BATCH + 1) { sample },
+            size = BandContractLimits.SAMPLES_PER_BATCH,
+        )
+        assertEquals(
+            BandFailureCategory.INVALID_INPUT,
+            assertFailsWith<BandException> {
+                VirtualBandFixtures.liveBatch.copy(
+                    samples = traversalOverflow,
+                ).immutableSnapshot()
+            }.category,
+        )
+
+        val sizeMismatch = MisreportedList(
+            values = listOf(sample),
+            size = 2,
+        )
+        assertEquals(
+            BandFailureCategory.INVALID_INPUT,
+            assertFailsWith<BandException> {
+                VirtualBandFixtures.liveBatch.copy(
+                    samples = sizeMismatch,
+                ).immutableSnapshot()
+            }.category,
+        )
+
+        assertEquals(
+            BandFailureCategory.INVALID_INPUT,
+            assertFailsWith<BandException> {
+                VirtualBandFixtures.liveBatch.copy(
+                    samples = TraversalFailureList(sample),
+                ).immutableSnapshot()
+            }.category,
+        )
+    }
+
+    @Test
+    fun oversizedInputsPreserveLifecycleOrderAndDiagnostics() {
+        val recorder = BandDiagnosticsRecorder()
+        val (session, generation) = readySession(recorder)
+        val oversized = VirtualBandFixtures.liveBatch.copy(
+            samples = IterationForbiddenList(
+                BandContractLimits.SAMPLES_PER_BATCH + 1,
+            ),
+        )
+
+        var error = assertFailsWith<BandException> {
+            session.stageLiveBatch(oversized, generation)
+        }
+        assertEquals(BandFailureCategory.INVALID_STATE, error.category)
+        assertEquals(
+            BandDiagnosticEvent(
+                BandDiagnosticKind.LIVE,
+                BandDiagnosticOutcome.REJECTED,
+                failureCategory = BandFailureCategory.INVALID_STATE,
+            ),
+            recorder.snapshot().last(),
+        )
+
+        session.beginLive()
+        error = assertFailsWith<BandException> {
+            session.stageLiveBatch(oversized, generation)
+        }
+        assertEquals(BandFailureCategory.INVALID_INPUT, error.category)
+        assertEquals(
+            BandDiagnosticEvent(
+                BandDiagnosticKind.LIVE,
+                BandDiagnosticOutcome.REJECTED,
+                failureCategory = BandFailureCategory.INVALID_INPUT,
+            ),
+            recorder.snapshot().last(),
+        )
+
+        val token = session.beginOperation(BandOperationClass.HISTORY)
+        val oversizedChunk = VirtualBandFixtures.historyChunk.copy(
+            batches = IterationForbiddenList(
+                BandContractLimits.BATCHES_PER_HISTORY_CHUNK + 1,
+            ),
+        )
+        error = assertFailsWith<BandException> {
+            session.stageHistoryChunk(oversizedChunk, token, generation)
+        }
+        assertEquals(BandFailureCategory.INVALID_INPUT, error.category)
+        assertEquals(
+            BandDiagnosticEvent(
+                BandDiagnosticKind.HISTORY,
+                BandDiagnosticOutcome.REJECTED,
+                failureCategory = BandFailureCategory.INVALID_INPUT,
+            ),
+            recorder.snapshot().last(),
+        )
+        session.cancelOperation(token)
     }
 
     @Test
@@ -694,15 +806,19 @@ class BandSessionMachineTest {
         var event = events.last()
         assertEquals(BandDiagnosticKind.HISTORY, event.kind)
         assertEquals(BandDiagnosticOutcome.STAGED, event.outcome)
+        val beganIndex = events.indexOfLast {
+            it.kind == BandDiagnosticKind.HISTORY &&
+                it.outcome == BandDiagnosticOutcome.BEGAN
+        }
+        val stagedIndex = events.indexOfLast {
+            it.kind == BandDiagnosticKind.HISTORY &&
+                it.outcome == BandDiagnosticOutcome.STAGED
+        }
+        assertTrue(beganIndex >= 0)
+        assertTrue(stagedIndex >= 0)
         assertTrue(
-            events.indexOfLast {
-                it.kind == BandDiagnosticKind.HISTORY &&
-                    it.outcome == BandDiagnosticOutcome.BEGAN
-            } <
-                events.indexOfLast {
-                    it.kind == BandDiagnosticKind.HISTORY &&
-                        it.outcome == BandDiagnosticOutcome.STAGED
-                },
+            beganIndex <
+                stagedIndex,
         )
 
         session.acknowledgeHistory(
@@ -719,16 +835,12 @@ class BandSessionMachineTest {
         event = events.last()
         assertEquals(BandDiagnosticKind.HISTORY, event.kind)
         assertEquals(BandDiagnosticOutcome.COMPLETED, event.outcome)
-        assertTrue(
-            events.indexOfLast {
-                it.kind == BandDiagnosticKind.HISTORY &&
-                    it.outcome == BandDiagnosticOutcome.STAGED
-            } <
-                events.indexOfLast {
-                    it.kind == BandDiagnosticKind.HISTORY &&
-                        it.outcome == BandDiagnosticOutcome.COMPLETED
-                },
-        )
+        val completedIndex = events.indexOfLast {
+            it.kind == BandDiagnosticKind.HISTORY &&
+                it.outcome == BandDiagnosticOutcome.COMPLETED
+        }
+        assertTrue(completedIndex >= 0)
+        assertTrue(stagedIndex < completedIndex)
         session.completeOperation(token)
 
         val cancellationRecorder = BandDiagnosticsRecorder()
