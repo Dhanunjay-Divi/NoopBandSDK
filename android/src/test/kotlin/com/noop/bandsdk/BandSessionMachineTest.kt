@@ -471,6 +471,126 @@ class BandSessionMachineTest {
     }
 
     @Test
+    fun invalidHistoryTokensRecordBoundedRejectionDiagnostics() {
+        val recorder = BandDiagnosticsRecorder()
+        val (session, generation) = readySession(recorder)
+        val supersededToken =
+            session.beginOperation(BandOperationClass.HISTORY)
+        session.cancelOperation(supersededToken)
+        val activeToken = session.beginOperation(BandOperationClass.HISTORY)
+        val (foreignSession, _) = readySession()
+        val foreignToken =
+            foreignSession.beginOperation(BandOperationClass.HISTORY)
+
+        var eventCount = recorder.snapshot().size
+        val stageError = assertFailsWith<BandException> {
+            session.stageHistoryChunk(
+                VirtualBandFixtures.historyChunk,
+                supersededToken,
+                generation,
+            )
+        }
+        assertEquals(BandFailureCategory.INVALID_STATE, stageError.category)
+        var events = recorder.snapshot()
+        assertEquals(eventCount + 1, events.size)
+        assertEquals(
+            BandDiagnosticEvent(
+                BandDiagnosticKind.HISTORY,
+                BandDiagnosticOutcome.REJECTED,
+                failureCategory = BandFailureCategory.INVALID_STATE,
+            ),
+            events.last(),
+        )
+
+        eventCount = events.size
+        val foreignStageError = assertFailsWith<BandException> {
+            session.stageHistoryChunk(
+                VirtualBandFixtures.historyChunk,
+                foreignToken,
+                generation,
+            )
+        }
+        assertEquals(
+            BandFailureCategory.STALE_CALLBACK,
+            foreignStageError.category,
+        )
+        events = recorder.snapshot()
+        assertEquals(eventCount + 1, events.size)
+        assertEquals(
+            BandDiagnosticEvent(
+                BandDiagnosticKind.HISTORY,
+                BandDiagnosticOutcome.REJECTED,
+                failureCategory = BandFailureCategory.STALE_CALLBACK,
+            ),
+            events.last(),
+        )
+
+        val acceptance = session.stageHistoryChunk(
+            VirtualBandFixtures.historyChunk,
+            activeToken,
+            generation,
+        )
+        val receipt = DurableHistoryReceipt(
+            acceptance = acceptance,
+            historyStateCommitted = true,
+            committedSamples = acceptance.acceptedSamples,
+            committed = true,
+        )
+
+        eventCount = recorder.snapshot().size
+        val staleAcknowledgeError = assertFailsWith<BandException> {
+            session.acknowledgeHistory(
+                receipt,
+                supersededToken,
+                generation,
+            )
+        }
+        assertEquals(
+            BandFailureCategory.INVALID_STATE,
+            staleAcknowledgeError.category,
+        )
+        events = recorder.snapshot()
+        assertEquals(eventCount + 1, events.size)
+        assertEquals(
+            BandDiagnosticEvent(
+                BandDiagnosticKind.HISTORY,
+                BandDiagnosticOutcome.REJECTED,
+                failureCategory = BandFailureCategory.INVALID_STATE,
+            ),
+            events.last(),
+        )
+
+        eventCount = events.size
+        val acknowledgeError = assertFailsWith<BandException> {
+            session.acknowledgeHistory(
+                receipt,
+                foreignToken,
+                generation,
+            )
+        }
+        assertEquals(
+            BandFailureCategory.STALE_CALLBACK,
+            acknowledgeError.category,
+        )
+        events = recorder.snapshot()
+        assertEquals(eventCount + 1, events.size)
+        assertEquals(
+            BandDiagnosticEvent(
+                BandDiagnosticKind.HISTORY,
+                BandDiagnosticOutcome.REJECTED,
+                failureCategory = BandFailureCategory.STALE_CALLBACK,
+            ),
+            events.last(),
+        )
+        val unchanged = session.snapshot()
+        assertEquals(BandSessionState.HISTORY_COLLECTING, unchanged.state)
+        assertEquals(BandOperationClass.HISTORY, unchanged.activeOperation)
+
+        session.acknowledgeHistory(receipt, activeToken, generation)
+        session.completeOperation(activeToken)
+    }
+
+    @Test
     fun diagnosticsAreBoundedAndStructurallyRedacted() {
         val recorder = BandDiagnosticsRecorder(2)
         recorder.record(
@@ -508,8 +628,10 @@ class BandSessionMachineTest {
         assertEquals(BandFailureCategory.INVALID_INPUT, error.category)
     }
 
-    private fun readySession(): Pair<BandSessionMachine, Long> {
-        val session = BandSessionMachine()
+    private fun readySession(
+        diagnostics: BandDiagnosticsRecorder = BandDiagnosticsRecorder(),
+    ): Pair<BandSessionMachine, Long> {
+        val session = BandSessionMachine(diagnostics)
         val generation = session.beginScan()
         session.selectCandidate(VirtualBandFixtures.candidate, generation)
         session.beginConnection(generation)
