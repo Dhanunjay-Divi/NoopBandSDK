@@ -2,11 +2,12 @@
 
 ## Status
 
-- State: `locally verified; protected review and merge pending`
+- State: `locally verified; pull request #15 review and merge pending`
 - Branch: `codex/sdk-pr17-final-followup-20260922`
 - Start commit:
   `7794bae631c1704e18ae5c341fbc32e89c9dc647`
-- Implementation commit: pending
+- Implementation commit:
+  `b0de1f7efa759b20e09936f60dc743880f877d8c`
 - Protected merge: pending
 - Clean export and NOOP application repin: pending
 
