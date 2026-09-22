@@ -383,6 +383,8 @@ struct BandSessionMachineTests {
             nextCursor: nil,
             complete: true,
             overflowed: false,
+            retainedRange: nil,
+            firstLostRange: nil,
             acknowledgementToken: "value-semantics",
             batches: batches
         )
@@ -442,6 +444,8 @@ struct BandSessionMachineTests {
             nextCursor: VirtualBandFixtures.historyChunk.nextCursor,
             complete: VirtualBandFixtures.historyChunk.complete,
             overflowed: VirtualBandFixtures.historyChunk.overflowed,
+            retainedRange: VirtualBandFixtures.historyChunk.retainedRange,
+            firstLostRange: VirtualBandFixtures.historyChunk.firstLostRange,
             acknowledgementToken:
                 VirtualBandFixtures.historyChunk.acknowledgementToken,
             batches: [
@@ -707,6 +711,37 @@ struct BandSessionMachineTests {
         )
     }
 
+    @Test("Scan generation is revalidated after diagnostic suspension")
+    func scanGenerationIsNotReturnedAfterClose() async throws {
+        let recorder = BandDiagnosticsRecorder(capacity: 64)
+        let session = BandSessionMachine(diagnostics: recorder)
+        await recorder.requestNextRecordSuspensionForTesting()
+
+        let scanTask = Task {
+            try await session.beginScan()
+        }
+        await recorder.waitForRecordSuspensionForTesting()
+        try await session.close()
+        await recorder.resumeSuspendedRecordForTesting()
+
+        await #expect(throws: BandFailureCategory.staleCallback) {
+            _ = try await scanTask.value
+        }
+        let snapshot = await session.snapshot()
+        #expect(snapshot.state == .closed)
+        #expect(snapshot.generation == 2)
+        let events = await recorder.snapshot()
+        #expect(
+            events.contains(
+                BandDiagnosticEvent(
+                    kind: .discovery,
+                    outcome: .stale,
+                    failureCategory: .staleCallback
+                )
+            )
+        )
+    }
+
     @Test("Connection callbacks are bound to the selected candidate token")
     func connectionCallbacksRejectForeignCandidateToken() async throws {
         let session = BandSessionMachine()
@@ -779,6 +814,279 @@ struct BandSessionMachineTests {
         #expect(await invalidFailureSession.snapshot().state == .ready)
     }
 
+    @Test("Established failure waits for a pending live receipt")
+    func establishedFailureWaitsForPendingLiveReceipt() async throws {
+        let recorder = BandDiagnosticsRecorder()
+        let (session, generation) =
+            try await readySession(diagnostics: recorder)
+        try await session.beginLive()
+        let acceptance = try await session.stageLiveBatch(
+            VirtualBandFixtures.liveBatch,
+            callbackGeneration: generation
+        )
+
+        await #expect(throws: BandFailureCategory.busy) {
+            try await session.failEstablishedSession(
+                .authentication,
+                callbackGeneration: generation
+            )
+        }
+        let pending = await session.snapshot()
+        #expect(pending.generation == generation)
+        #expect(pending.state == .liveCollecting)
+        #expect(pending.liveActive)
+        #expect(
+            await recorder.snapshot().last == BandDiagnosticEvent(
+                kind: .authentication,
+                outcome: .rejected,
+                failureCategory: .busy
+            )
+        )
+
+        try await session.acknowledgeLive(
+            receipt: DurableLiveReceipt(
+                acceptance: acceptance,
+                committedSamples: acceptance.acceptedSamples.count,
+                committed: true
+            ),
+            callbackGeneration: generation
+        )
+        try await session.failEstablishedSession(
+            .authentication,
+            callbackGeneration: generation
+        )
+        #expect(await session.snapshot().state == .rejected)
+    }
+
+    @Test("Live and history streams are negotiated per lane")
+    func liveAndHistoryStreamsAreNegotiatedPerLane() async throws {
+        func report(
+            liveStreams: Set<BandStreamKind>,
+            historyStreams: Set<BandStreamKind>
+        ) -> BandCapabilityReport {
+            let base = VirtualBandFixtures.capabilities
+            return BandCapabilityReport(
+                schemaVersion: base.schemaVersion,
+                protocolVersion: base.protocolVersion,
+                hardwareRevision: base.hardwareRevision,
+                firmwareVersion: base.firmwareVersion,
+                historyDays: base.historyDays,
+                capabilities: base.capabilities,
+                liveStreams: liveStreams,
+                historyStreams: historyStreams
+            )
+        }
+
+        func readySession(
+            capabilities: BandCapabilityReport
+        ) async throws -> (BandSessionMachine, UInt64) {
+            let session = BandSessionMachine()
+            let generation = try await session.beginScan()
+            let connectionToken = try await session.selectCandidate(
+                VirtualBandFixtures.candidate,
+                callbackGeneration: generation
+            )
+            try await session.beginConnection(
+                token: connectionToken,
+                callbackGeneration: generation
+            )
+            try await session.beginAuthentication(
+                token: connectionToken,
+                callbackGeneration: generation
+            )
+            try await session.completeConnection(
+                VirtualBandFixtures.identity,
+                token: connectionToken,
+                callbackGeneration: generation
+            )
+            try await session.acceptCapabilities(
+                capabilities,
+                token: connectionToken,
+                callbackGeneration: generation
+            )
+            return (session, generation)
+        }
+
+        let historyOnly = report(
+            liveStreams: [],
+            historyStreams: [.heartRate]
+        )
+        let (historySession, historyGeneration) =
+            try await readySession(capabilities: historyOnly)
+        await #expect(throws: BandFailureCategory.unsupported) {
+            try await historySession.beginLive()
+        }
+
+        let historyToken =
+            try await historySession.beginOperation(.history)
+        let historyAcceptance = try await historySession.stageHistoryChunk(
+            VirtualBandFixtures.historyChunk,
+            token: historyToken,
+            callbackGeneration: historyGeneration
+        )
+        try await historySession.acknowledgeHistory(
+            receipt: DurableHistoryReceipt(
+                acceptance: historyAcceptance,
+                historyStateCommitted: true,
+                committedSamples: historyAcceptance.acceptedSamples.count,
+                committed: true
+            ),
+            token: historyToken,
+            callbackGeneration: historyGeneration
+        )
+        try await historySession.completeOperation(historyToken)
+
+        let liveOnly = report(
+            liveStreams: [.heartRate],
+            historyStreams: []
+        )
+        let (liveSession, liveGeneration) =
+            try await readySession(capabilities: liveOnly)
+        try await liveSession.beginLive()
+        let liveAcceptance = try await liveSession.stageLiveBatch(
+            VirtualBandFixtures.liveBatch,
+            callbackGeneration: liveGeneration
+        )
+        try await liveSession.acknowledgeLive(
+            receipt: DurableLiveReceipt(
+                acceptance: liveAcceptance,
+                committedSamples: liveAcceptance.acceptedSamples.count,
+                committed: true
+            ),
+            callbackGeneration: liveGeneration
+        )
+        try await liveSession.stopLive()
+
+        let unsupportedHistoryToken =
+            try await liveSession.beginOperation(.history)
+        await #expect(throws: BandFailureCategory.unsupported) {
+            _ = try await liveSession.stageHistoryChunk(
+                VirtualBandFixtures.historyChunk,
+                token: unsupportedHistoryToken,
+                callbackGeneration: liveGeneration
+            )
+        }
+        try await liveSession.cancelOperation(unsupportedHistoryToken)
+    }
+
+    @Test("Overflow ranges are validated and bound to durable receipts")
+    func overflowRangesAreValidatedAndBoundToDurableReceipt() async throws {
+        func chunk(
+            overflowed: Bool = true,
+            retainedRange: BandHistoryRange?,
+            firstLostRange: BandHistoryRange?
+        ) -> BandHistoryChunk {
+            BandHistoryChunk(
+                chunkIdentity:
+                    VirtualBandFixtures.historyChunk.chunkIdentity,
+                previousCursor:
+                    VirtualBandFixtures.historyChunk.previousCursor,
+                nextCursor:
+                    VirtualBandFixtures.historyChunk.nextCursor,
+                complete: VirtualBandFixtures.historyChunk.complete,
+                overflowed: overflowed,
+                retainedRange: retainedRange,
+                firstLostRange: firstLostRange,
+                acknowledgementToken:
+                    VirtualBandFixtures.historyChunk.acknowledgementToken,
+                batches: VirtualBandFixtures.historyChunk.batches
+            )
+        }
+
+        let (session, generation) = try await readySession()
+        let token = try await session.beginOperation(.history)
+        let retained = BandHistoryRange(
+            startDeviceTimeMilliseconds: 2_000,
+            endDeviceTimeMilliseconds: 3_000
+        )
+        let firstLost = BandHistoryRange(
+            startDeviceTimeMilliseconds: 1_000,
+            endDeviceTimeMilliseconds: 1_999
+        )
+        let valid = chunk(
+            retainedRange: retained,
+            firstLostRange: firstLost
+        )
+
+        let invalidChunks = [
+            chunk(retainedRange: nil, firstLostRange: firstLost),
+            chunk(retainedRange: retained, firstLostRange: nil),
+            chunk(
+                overflowed: false,
+                retainedRange: retained,
+                firstLostRange: firstLost
+            ),
+            chunk(
+                retainedRange: BandHistoryRange(
+                    startDeviceTimeMilliseconds: 3_000,
+                    endDeviceTimeMilliseconds: 2_000
+                ),
+                firstLostRange: firstLost
+            ),
+        ]
+        for invalid in invalidChunks {
+            await #expect(throws: BandFailureCategory.invalidInput) {
+                _ = try await session.stageHistoryChunk(
+                    invalid,
+                    token: token,
+                    callbackGeneration: generation
+                )
+            }
+        }
+
+        let acceptance = try await session.stageHistoryChunk(
+            valid,
+            token: token,
+            callbackGeneration: generation
+        )
+        #expect(acceptance.retainedRange == retained)
+        #expect(acceptance.firstLostRange == firstLost)
+
+        let mismatchedAcceptance = HistoryAcceptance(
+            chunkIdentity: acceptance.chunkIdentity,
+            acknowledgementToken: acceptance.acknowledgementToken,
+            nextCursor: acceptance.nextCursor,
+            complete: acceptance.complete,
+            overflowed: acceptance.overflowed,
+            retainedRange: acceptance.retainedRange,
+            firstLostRange: BandHistoryRange(
+                startDeviceTimeMilliseconds: 0,
+                endDeviceTimeMilliseconds: 999
+            ),
+            acceptedSamples: acceptance.acceptedSamples,
+            duplicateSamples: acceptance.duplicateSamples,
+            sessionNonce: acceptance.sessionNonce,
+            receiptSequence: acceptance.receiptSequence
+        )
+        await #expect(throws: BandFailureCategory.storage) {
+            try await session.acknowledgeHistory(
+                receipt: DurableHistoryReceipt(
+                    acceptance: mismatchedAcceptance,
+                    historyStateCommitted: true,
+                    committedSamples: acceptance.acceptedSamples.count,
+                    committed: true
+                ),
+                token: token,
+                callbackGeneration: generation
+            )
+        }
+
+        let receipt = DurableHistoryReceipt(
+            acceptance: acceptance,
+            historyStateCommitted: true,
+            committedSamples: acceptance.acceptedSamples.count,
+            committed: true
+        )
+        #expect(receipt.retainedRange == retained)
+        #expect(receipt.firstLostRange == firstLost)
+        try await session.acknowledgeHistory(
+            receipt: receipt,
+            token: token,
+            callbackGeneration: generation
+        )
+        try await session.completeOperation(token)
+    }
+
     @Test("Terminal history chunks preserve the last durable cursor")
     func terminalHistoryChunkPreservesCursor() async throws {
         let (session, generation) = try await readySession()
@@ -791,6 +1099,11 @@ struct BandSessionMachineTests {
             nextCursor: "cursor-2",
             complete: false,
             overflowed: false,
+            retainedRange: BandHistoryRange(
+                startDeviceTimeMilliseconds: 2_000,
+                endDeviceTimeMilliseconds: 3_000
+            ),
+            firstLostRange: nil,
             acknowledgementToken: "cursor-seed-ack",
             batches: VirtualBandFixtures.historyChunk.batches
         )
@@ -813,6 +1126,8 @@ struct BandSessionMachineTests {
             nextCursor: nil,
             complete: true,
             overflowed: false,
+            retainedRange: firstChunk.retainedRange,
+            firstLostRange: nil,
             acknowledgementToken: "cursor-terminal-ack",
             batches: []
         )
@@ -969,6 +1284,8 @@ struct BandSessionMachineTests {
             nextCursor: "overlap-cursor",
             complete: true,
             overflowed: false,
+            retainedRange: nil,
+            firstLostRange: nil,
             acknowledgementToken: "overlap-ack",
             batches: [
                 BandSampleBatch(
@@ -1484,24 +1801,15 @@ struct BandSessionMachineTests {
             callbackGeneration: generation
         )
 
-        let beginTask = Task {
-            try await session.beginAuthentication(
-                token: connectionToken,
-                callbackGeneration: generation
-            )
-        }
-        let completionTask = Task {
-            while await session.snapshot().state == .connecting {
-                await Task.yield()
-            }
-            try await session.completeConnection(
-                VirtualBandFixtures.identity,
-                token: connectionToken,
-                callbackGeneration: generation
-            )
-        }
-        try await beginTask.value
-        try await completionTask.value
+        try await session.beginAuthentication(
+            token: connectionToken,
+            callbackGeneration: generation
+        )
+        try await session.completeConnection(
+            VirtualBandFixtures.identity,
+            token: connectionToken,
+            callbackGeneration: generation
+        )
 
         let events = await recorder.snapshot()
         let connectionCompleted = try #require(
