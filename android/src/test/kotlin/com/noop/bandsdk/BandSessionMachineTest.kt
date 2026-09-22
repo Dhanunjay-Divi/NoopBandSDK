@@ -309,6 +309,52 @@ class BandSessionMachineTest {
     }
 
     @Test
+    fun connectionCompletionCallbacksAreGenerationFenced() {
+        val result = BandConformanceRunner.run(
+            "connection_callbacks_generation_fenced",
+        )
+        assertEquals(
+            BandFailureCategory.STALE_CALLBACK.wireValue,
+            result.failure,
+        )
+        assertTrue("connection_failed" in result.events)
+        assertTrue("stale_cancel_rejected" in result.events)
+        assertTrue("stale_failure_rejected" in result.events)
+        assertTrue("stale_terminals_preserved_state" in result.events)
+        assertTrue("stale_connection_rejected" in result.events)
+        assertTrue("stale_phases_preserved" in result.events)
+        assertTrue("connection_diagnostics_bounded" in result.events)
+        assertEquals(BandSessionState.READY.wireValue, result.finalState)
+    }
+
+    @Test
+    fun connectionAndAuthenticationHaveExplicitTerminals() {
+        val result = BandConformanceRunner.run("connection_terminal_paths")
+        assertEquals(
+            BandFailureCategory.SECURITY_FAILURE.wireValue,
+            result.failure,
+        )
+        assertTrue("connection_cancelled" in result.events)
+        assertTrue("authentication_rejected" in result.events)
+        assertTrue("security_failure" in result.events)
+        assertTrue("connection_recovered" in result.events)
+        assertTrue("connection_diagnostics_bounded" in result.events)
+        assertEquals(BandSessionState.READY.wireValue, result.finalState)
+    }
+
+    @Test
+    fun pendingHistoryRejectionRecordsBoundedBusyEvent() {
+        val result = BandConformanceRunner.run(
+            "history_pending_busy_diagnostics",
+        )
+        assertEquals(BandFailureCategory.BUSY.wireValue, result.failure)
+        assertTrue("second_chunk_rejected" in result.events)
+        assertTrue("history_busy_recorded" in result.events)
+        assertEquals("operation_cancelled", result.events.last())
+        assertEquals(BandSessionState.READY.wireValue, result.finalState)
+    }
+
+    @Test
     fun diagnosticsAreBoundedAndStructurallyRedacted() {
         val recorder = BandDiagnosticsRecorder(2)
         recorder.record(

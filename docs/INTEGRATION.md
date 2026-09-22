@@ -48,10 +48,14 @@ captures, health data, endpoints, or firmware.
 9. Do not expose pairing, possession, haptic, alarm, wear, firmware, or sensor
    capabilities until the exact supplier and physical gates pass.
 
-Capability callbacks must include the session generation captured for the
-supplier request. Sample sequences and device-time milliseconds use the
-non-negative signed 64-bit range on both platforms. Bounded protocol strings
-use UTF-8 byte counts. Adapters must reject values outside these domains.
+Discovery, connection/authentication, capability, live/history delivery,
+durable-receipt, and reconnect callbacks must include the session generation
+captured for the supplier request. Connection and authentication cancellation
+or failure must also include the bounded phase captured for that attempt; the
+adapter must not infer phase from current replacement-session state. Sample
+sequences and device-time milliseconds use the non-negative signed 64-bit
+range on both platforms. Bounded protocol strings use UTF-8 byte counts.
+Adapters must reject values outside these domains.
 
 ## Band connection and authentication pass
 
@@ -69,9 +73,11 @@ The production adapter must preserve these distinct authorities:
    approved cryptographic authentication. Long-lived secrets belong in
    platform secure storage and never in this repository, logs, preferences, or
    source artifacts.
-5. The neutral session enters capability negotiation. The adapter passes the
-   current session generation with the report; stale reports are rejected
-   without changing the replacement session.
+5. The adapter reports connection and authentication progress, success, or a
+   categorized terminal with the generation captured when that attempt began.
+   The neutral session then enters capability negotiation. Stale connection,
+   authentication, and capability callbacks are rejected without changing the
+   replacement session.
 6. The app enables only negotiated streams and commands. Unsupported inputs
    remain missing, and firmware operations use their own diagnostics and cannot
    overlap live collection.
