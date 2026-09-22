@@ -5,7 +5,8 @@
 - State: `locally verified; PR review and integration pending`
 - Branch: `codex/sdk-late-capability-state-20260922`
 - Start commit: `823930fa16d30ea7849a557823215c913a36fb8b`
-- Implementation commit: pending
+- Implementation commit:
+  `03f37f4c3a7051c9ff1cb969d971c927bf5594ea`
 - Supplier artifacts: absent
 - Physical-device claims: unchanged and unproven
 

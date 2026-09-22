@@ -13,7 +13,8 @@ Last updated: **2026-09-22**
   procedural, not enforced by a repository rule
 - Active branch: `codex/sdk-late-capability-state-20260922`
 - Start commit: `823930fa16d30ea7849a557823215c913a36fb8b`
-- Implementation commit: pending
+- Implementation commit:
+  `03f37f4c3a7051c9ff1cb969d971c927bf5594ea`
 - PR merge: pending
 - Supplier binaries: absent and prohibited
 - WHOOP application transport: unchanged
