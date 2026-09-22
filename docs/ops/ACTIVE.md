@@ -4,16 +4,16 @@ Last updated: **2026-09-22**
 
 ## Current round
 
-- [PR 17 late review remediation](rounds/2026-09-22-pr17-late-review-remediation.md)
+- [Security-failure session terminal](rounds/2026-09-22-security-failure-session-terminal.md)
 
 ## Current boundary
 
 - Protected branch: `main`
-- Active branch: `codex/sdk-pr17-late-review-20260922`
-- Start commit: `78c17cbd495353f33b5ef169bd1200ee9a0c35df`
-- Implementation commit: `bc778da67ede2f32897f0dd2851880ef15b7a947`
+- Active branch: `codex/sdk-security-terminal-20260922`
+- Start commit: `44559aeb4b1b50af9e6ab8b8dc786f87821c72d9`
+- Implementation commit: `dbd2a3d40b124042ca089baa95be54fcc82f85d5`
 - Evidence commit: current record commit
-- Protected merge: `78c17cbd495353f33b5ef169bd1200ee9a0c35df`
+- Protected merge: `44559aeb4b1b50af9e6ab8b8dc786f87821c72d9`
 - Supplier binaries: absent and prohibited
 - WHOOP app transport: unchanged in the separate NOOP application repository
 - Production supplier adapter: unavailable pending approved artifacts and
@@ -26,11 +26,11 @@ possession proof, or firmware update behavior.
 
 ## Current evidence
 
-- Swift package: 30 tests pass.
-- Kotlin/JVM: 31 tests pass and the conformance distribution builds.
+- Swift package: 32 tests pass.
+- Kotlin/JVM: 35 tests pass and the conformance distribution builds.
 - Shared contract: 33 Swift/Kotlin scenarios match the checked-in expected
   results.
-- Repository gate: 41 files pass the language, binary, JSON, and
+- Repository gate: 43 files pass the language, binary, JSON, and
   hosted-workflow guards.
 - JSON validation and `git diff --check` pass.
 - Connection/authentication completion is generation-fenced on Apple and
@@ -62,17 +62,18 @@ possession proof, or firmware update behavior.
   This is historical evidence for the prior protected revision; a new clean
   export is required after this round merges.
 
-The prior protected review rounds are merged. The final NOOP application PR
-`#17` review found two additional deterministic SDK gaps: Kotlin live/history
-models may retain caller-owned mutable collections across validation, and an
-operation-level security failure may return to ready/live state while keeping
-the same authenticated identity and capability report. This isolated round
-closes those matched state-machine boundaries before any application artifact
-is repinned. Supplier and physical-device gates remain separate.
-
-The late-review implementation is locally green: 42 repository files pass the
+The prior protected review rounds are merged. The PR `#17` late-review
+implementation is on protected SDK `main`: 42 repository files pass the
 source/binary/JSON gate, Kotlin passes 34 tests and builds its distribution,
 Swift passes 31 tests, and all 33 shared conformance scenarios match both
-platforms and the checked-in expected contract. Protected SDK review/merge,
-two clean exports, application repin, and the separate app WorkManager
-quiescence correction remain pending.
+platforms and the checked-in expected contract.
+
+A subsequent application review found one remaining deterministic P1: both
+session machines still permit `beginScan()` from `securityFailure`. This
+isolated round makes that state terminal for the same session object and
+requires a newly constructed session before scanning again. The direct Apple
+and Android regressions, complete package tests, distribution build, repository
+gate, and all 33 shared scenarios are locally green. A clean-context read-only
+review found no implementation defect. Protected SDK review/merge, two clean
+exports, application repin, and final PR `#17` verification remain pending.
+Supplier and physical-device gates remain separate.

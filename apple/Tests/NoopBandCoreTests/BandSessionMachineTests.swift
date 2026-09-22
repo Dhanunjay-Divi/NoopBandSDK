@@ -276,8 +276,47 @@ struct BandSessionMachineTests {
         #expect(result.events.contains("stale_callback_rejected"))
         #expect(result.events.contains("security_failure_terminal"))
         #expect(result.events.contains("security_failure_stale_token_rejected"))
-        #expect(result.events.last == "security_failure_recovered")
+        #expect(result.events.contains("security_failure_restart_rejected"))
+        #expect(result.events.last == "replacement_session_ready")
         #expect(result.finalState == BandSessionState.ready.rawValue)
+    }
+
+    @Test("Security failure requires a replacement session object")
+    func securityFailureRequiresReplacementSession() async throws {
+        let session = BandSessionMachine()
+        let generation = try await session.beginScan()
+        try await session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            callbackGeneration: generation
+        )
+        try await session.beginConnection(callbackGeneration: generation)
+        try await session.beginAuthentication(callbackGeneration: generation)
+        try await session.completeConnection(
+            VirtualBandFixtures.identity,
+            callbackGeneration: generation
+        )
+        try await session.acceptCapabilities(
+            VirtualBandFixtures.capabilities,
+            callbackGeneration: generation
+        )
+        let token = try await session.beginOperation(.battery)
+        try await session.failOperation(token, category: .securityFailure)
+        let terminal = await session.snapshot()
+
+        #expect(terminal.state == .securityFailure)
+        await #expect(throws: BandFailureCategory.invalidState) {
+            _ = try await session.beginScan()
+        }
+        let unchanged = await session.snapshot()
+        #expect(unchanged.state == .securityFailure)
+        #expect(unchanged.generation == terminal.generation)
+
+        let replacement = BandSessionMachine()
+        let replacementGeneration = try await replacement.beginScan()
+        let replacementSnapshot = await replacement.snapshot()
+        #expect(replacementGeneration == 1)
+        #expect(replacementSnapshot.state == .scanning)
+        #expect(replacementSnapshot.generation == replacementGeneration)
     }
 
     @Test("Swift batches retain value-semantic sample snapshots")
@@ -342,7 +381,8 @@ struct BandSessionMachineTests {
         #expect(result.events.contains("connection_cancelled"))
         #expect(result.events.contains("authentication_rejected"))
         #expect(result.events.contains("security_failure"))
-        #expect(result.events.contains("connection_recovered"))
+        #expect(result.events.contains("security_failure_restart_rejected"))
+        #expect(result.events.contains("replacement_session_ready"))
         #expect(result.events.contains("connection_diagnostics_bounded"))
         #expect(result.finalState == BandSessionState.ready.rawValue)
     }

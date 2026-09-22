@@ -324,8 +324,33 @@ class BandSessionMachineTest {
         assertTrue("stale_callback_rejected" in result.events)
         assertTrue("security_failure_terminal" in result.events)
         assertTrue("security_failure_stale_token_rejected" in result.events)
-        assertEquals("security_failure_recovered", result.events.last())
+        assertTrue("security_failure_restart_rejected" in result.events)
+        assertEquals("replacement_session_ready", result.events.last())
         assertEquals(BandSessionState.READY.wireValue, result.finalState)
+    }
+
+    @Test
+    fun securityFailureRequiresReplacementSessionObject() {
+        val (session, _) = readySession()
+        val token = session.beginOperation(BandOperationClass.BATTERY)
+        session.failOperation(token, BandFailureCategory.SECURITY_FAILURE)
+        val terminal = session.snapshot()
+
+        assertEquals(BandSessionState.SECURITY_FAILURE, terminal.state)
+        val error = assertFailsWith<BandException> {
+            session.beginScan()
+        }
+        assertEquals(BandFailureCategory.INVALID_STATE, error.category)
+        val unchanged = session.snapshot()
+        assertEquals(BandSessionState.SECURITY_FAILURE, unchanged.state)
+        assertEquals(terminal.generation, unchanged.generation)
+
+        val replacement = BandSessionMachine()
+        val replacementGeneration = replacement.beginScan()
+        val replacementSnapshot = replacement.snapshot()
+        assertEquals(1, replacementGeneration)
+        assertEquals(BandSessionState.SCANNING, replacementSnapshot.state)
+        assertEquals(replacementGeneration, replacementSnapshot.generation)
     }
 
     @Test
@@ -427,7 +452,8 @@ class BandSessionMachineTest {
         assertTrue("connection_cancelled" in result.events)
         assertTrue("authentication_rejected" in result.events)
         assertTrue("security_failure" in result.events)
-        assertTrue("connection_recovered" in result.events)
+        assertTrue("security_failure_restart_rejected" in result.events)
+        assertTrue("replacement_session_ready" in result.events)
         assertTrue("connection_diagnostics_bounded" in result.events)
         assertEquals(BandSessionState.READY.wireValue, result.finalState)
     }
