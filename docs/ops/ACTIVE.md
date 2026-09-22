@@ -11,7 +11,8 @@ Last updated: **2026-09-22**
 - Protected branch: `main`
 - Active branch: `codex/sdk-pr17-overflow-firmware-closeout-20260922`
 - Start commit: `a8f94b5cbda329eaf7793c5a2cece94fb568acc0`
-- Implementation commit: pending
+- Implementation commit:
+  `fde8068363248418623a8b2805d9a891f3e51f84`
 - Protected merge: pending
 - Supplier binaries: absent and prohibited
 - WHOOP application transport: unchanged
@@ -67,9 +68,9 @@ possession proof, firmware flashing, or OTA behavior.
 
 ## Next ordered actions
 
-1. Implement and verify the active follow-up.
-2. Commit, push once, open a protected SDK pull request, and merge normally.
-3. Produce two byte-identical clean source exports from the protected merge.
-4. Repin NOOP application PR `#17`, rerun its local artifact/app gates, push
+1. Push the verified candidate once, open an SDK pull request, require hosted
+   checks, and merge normally without pushing directly to `main`.
+2. Produce two byte-identical clean source exports from the reviewed merge.
+3. Repin NOOP application PR `#17`, rerun its local artifact/app gates, push
    once, and require the final protected hosted checks.
-5. Keep supplier/physical-device gates explicit and separate.
+4. Keep supplier/physical-device gates explicit and separate.

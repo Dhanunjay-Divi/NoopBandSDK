@@ -6,6 +6,8 @@
 - Branch: `codex/sdk-pr17-overflow-firmware-closeout-20260922`
 - Start commit:
   `a8f94b5cbda329eaf7793c5a2cece94fb568acc0`
+- Implementation commit:
+  `fde8068363248418623a8b2805d9a891f3e51f84`
 - Protected merge: pending
 - Clean export and NOOP application repin: pending
 
