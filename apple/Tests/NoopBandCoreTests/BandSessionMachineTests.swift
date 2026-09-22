@@ -274,8 +274,47 @@ struct BandSessionMachineTests {
         #expect(result.events.contains("operation_failed"))
         #expect(result.events.contains("disconnect_recovery"))
         #expect(result.events.contains("stale_callback_rejected"))
-        #expect(result.events.last == "reconnected")
+        #expect(result.events.contains("security_failure_terminal"))
+        #expect(result.events.contains("security_failure_stale_token_rejected"))
+        #expect(result.events.last == "security_failure_recovered")
         #expect(result.finalState == BandSessionState.ready.rawValue)
+    }
+
+    @Test("Swift batches retain value-semantic sample snapshots")
+    func batchCollectionsHaveValueSemantics() throws {
+        var samples = VirtualBandFixtures.liveBatch.samples
+        let batch = BandSampleBatch(
+            sourceIdentity: VirtualBandFixtures.identity.sourceIdentity,
+            lane: .live,
+            parserRevision: "parser-v1",
+            calibrationRevision: "calibration-v1",
+            samples: samples
+        )
+        samples.removeAll()
+        #expect(batch.samples.count == 1)
+
+        var batches = [
+            BandSampleBatch(
+                sourceIdentity: VirtualBandFixtures.identity.sourceIdentity,
+                lane: .history,
+                parserRevision: "parser-v1",
+                calibrationRevision: "calibration-v1",
+                samples: batch.samples
+            ),
+        ]
+        let chunk = BandHistoryChunk(
+            chunkIdentity: "value-semantics",
+            previousCursor: nil,
+            nextCursor: nil,
+            complete: true,
+            overflowed: false,
+            acknowledgementToken: "value-semantics",
+            batches: batches
+        )
+        batches.removeAll()
+        #expect(chunk.batches.count == 1)
+        #expect(chunk.batches.first?.samples.count == 1)
+        try chunk.validate()
     }
 
     @Test("Connection completion callbacks are generation fenced")

@@ -8,6 +8,24 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class BandSessionMachineTest {
+    private class SingleTraversalList<T>(
+        private val values: List<T>,
+    ) : AbstractList<T>() {
+        private var traversals = 0
+
+        override val size: Int
+            get() = values.size
+
+        override fun get(index: Int): T = values[index]
+
+        override fun iterator(): Iterator<T> {
+            check(traversals++ == 0) {
+                "caller-owned collection was traversed more than once"
+            }
+            return values.iterator()
+        }
+    }
+
     @Test
     fun deterministicScenariosAreStable() {
         BandConformanceRunner.automatedScenarios.forEach { scenario ->
@@ -304,8 +322,80 @@ class BandSessionMachineTest {
         assertTrue("operation_failed" in result.events)
         assertTrue("disconnect_recovery" in result.events)
         assertTrue("stale_callback_rejected" in result.events)
-        assertEquals("reconnected", result.events.last())
+        assertTrue("security_failure_terminal" in result.events)
+        assertTrue("security_failure_stale_token_rejected" in result.events)
+        assertEquals("security_failure_recovered", result.events.last())
         assertEquals(BandSessionState.READY.wireValue, result.finalState)
+    }
+
+    @Test
+    fun liveBatchSnapshotsCallerOwnedSamplesBeforeProcessing() {
+        val (session, generation) = readySession()
+        val first = VirtualBandFixtures.liveBatch.samples.first()
+        val second = first.copy(
+            identity = first.identity.copy(sequence = first.identity.sequence + 1),
+        )
+        val batch = VirtualBandFixtures.liveBatch.copy(
+            samples = SingleTraversalList(listOf(first, second)),
+        )
+        session.beginLive()
+
+        val acceptance = session.stageLiveBatch(batch, generation)
+
+        assertEquals(2, acceptance.acceptedSamples.size)
+        assertEquals(0, acceptance.duplicateSamples)
+    }
+
+    @Test
+    fun historyChunkDeepSnapshotsCallerOwnedCollectionsBeforeProcessing() {
+        val (session, generation) = readySession()
+        val token = session.beginOperation(BandOperationClass.HISTORY)
+        val originalBatch = VirtualBandFixtures.historyChunk.batches.first()
+        val first = originalBatch.samples.first()
+        val second = first.copy(
+            identity = first.identity.copy(sequence = first.identity.sequence + 1),
+        )
+        val batch = originalBatch.copy(
+            samples = SingleTraversalList(listOf(first, second)),
+        )
+        val chunk = VirtualBandFixtures.historyChunk.copy(
+            batches = SingleTraversalList(listOf(batch)),
+        )
+
+        val acceptance = session.stageHistoryChunk(chunk, token, generation)
+
+        assertEquals(2, acceptance.acceptedSamples)
+        assertEquals(0, acceptance.duplicateSamples)
+    }
+
+    @Test
+    fun immutableSnapshotsDoNotRetainMutableCallerCollections() {
+        val samples = VirtualBandFixtures.liveBatch.samples.toMutableList()
+        val expectedSampleCount = samples.size
+        val batch = VirtualBandFixtures.liveBatch.copy(samples = samples)
+        val batchSnapshot = batch.immutableSnapshot()
+        samples.clear()
+        assertEquals(expectedSampleCount, batchSnapshot.samples.size)
+
+        val nestedSamples =
+            VirtualBandFixtures.historyChunk.batches.first().samples.toMutableList()
+        val expectedNestedSampleCount = nestedSamples.size
+        val batches = mutableListOf(
+            VirtualBandFixtures.historyChunk.batches.first().copy(
+                samples = nestedSamples,
+            ),
+        )
+        val expectedBatchCount = batches.size
+        val chunkSnapshot =
+            VirtualBandFixtures.historyChunk.copy(batches = batches)
+                .immutableSnapshot()
+        nestedSamples.clear()
+        batches.clear()
+        assertEquals(expectedBatchCount, chunkSnapshot.batches.size)
+        assertEquals(
+            expectedNestedSampleCount,
+            chunkSnapshot.batches.first().samples.size,
+        )
     }
 
     @Test
@@ -390,5 +480,16 @@ class BandSessionMachineTest {
             BandConformanceRunner.run("not-a-scenario")
         }
         assertEquals(BandFailureCategory.INVALID_INPUT, error.category)
+    }
+
+    private fun readySession(): Pair<BandSessionMachine, Long> {
+        val session = BandSessionMachine()
+        val generation = session.beginScan()
+        session.selectCandidate(VirtualBandFixtures.candidate, generation)
+        session.beginConnection(generation)
+        session.beginAuthentication(generation)
+        session.completeConnection(VirtualBandFixtures.identity, generation)
+        session.acceptCapabilities(VirtualBandFixtures.capabilities, generation)
+        return session to generation
     }
 }
