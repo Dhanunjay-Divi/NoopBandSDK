@@ -13,7 +13,8 @@ Last updated: **2026-09-22**
   procedural, not enforced by a repository rule
 - Active branch: `codex/sdk-export-consumer-fix-20260922`
 - Start commit: `c533c530bb8615d719b5a2adcf51ec189b6037eb`
-- Implementation commit: pending
+- Implementation commit:
+  `054f9ab414c6c1b8e741d22dcef1563e886206ce`
 - PR merge: pending
 - Supplier binaries: absent and prohibited
 - WHOOP application transport: unchanged
