@@ -144,6 +144,34 @@ struct BandSessionMachineTests {
         }
     }
 
+    @Test("Step samples require integral counts")
+    func stepSamplesRequireIntegralCounts() throws {
+        let identity = BandSampleIdentity(
+            stream: .steps,
+            sequence: 1,
+            deviceTimeMilliseconds: 1
+        )
+        for value in [0.0, 1.0, 1_000_000.0] {
+            try BandSample(
+                identity: identity,
+                value: value,
+                unit: .count,
+                quality: .accepted
+            ).validate()
+        }
+
+        for value in [0.5, 1.5, 999_999.5] {
+            #expect(throws: BandFailureCategory.invalidInput) {
+                try BandSample(
+                    identity: identity,
+                    value: value,
+                    unit: .count,
+                    quality: .accepted
+                ).validate()
+            }
+        }
+    }
+
     @Test("Capability callbacks are generation fenced")
     func capabilityCallbacksAreGenerationFenced() async throws {
         let result = try await BandConformanceRunner.run(
@@ -504,6 +532,71 @@ struct BandSessionMachineTests {
             callbackGeneration: generation
         )
         try await session.completeOperation(activeToken)
+    }
+
+    @Test("History diagnostics distinguish staging from durable completion")
+    func historyDiagnosticsDistinguishStagingFromCompletion() async throws {
+        let recorder = BandDiagnosticsRecorder()
+        let (session, generation) = try await readySession(
+            diagnostics: recorder
+        )
+        let token = try await session.beginOperation(.history)
+
+        let acceptance = try await session.stageHistoryChunk(
+            VirtualBandFixtures.historyChunk,
+            token: token,
+            callbackGeneration: generation
+        )
+        var events = await recorder.snapshot()
+        var event = events.last
+        #expect(event?.kind == .history)
+        #expect(event?.outcome == .staged)
+        #expect(
+            events.lastIndex(where: {
+                $0.kind == .history && $0.outcome == .began
+            })! < events.lastIndex(where: {
+                $0.kind == .history && $0.outcome == .staged
+            })!
+        )
+
+        try await session.acknowledgeHistory(
+            receipt: DurableHistoryReceipt(
+                acceptance: acceptance,
+                historyStateCommitted: true,
+                committedSamples: acceptance.acceptedSamples,
+                committed: true
+            ),
+            token: token,
+            callbackGeneration: generation
+        )
+        events = await recorder.snapshot()
+        event = events.last
+        #expect(event?.kind == .history)
+        #expect(event?.outcome == .completed)
+        #expect(
+            events.lastIndex(where: {
+                $0.kind == .history && $0.outcome == .staged
+            })! < events.lastIndex(where: {
+                $0.kind == .history && $0.outcome == .completed
+            })!
+        )
+        try await session.completeOperation(token)
+
+        let cancellationRecorder = BandDiagnosticsRecorder()
+        let (cancellationSession, cancellationGeneration) =
+            try await readySession(diagnostics: cancellationRecorder)
+        let cancellationToken =
+            try await cancellationSession.beginOperation(.history)
+        _ = try await cancellationSession.stageHistoryChunk(
+            VirtualBandFixtures.historyChunk,
+            token: cancellationToken,
+            callbackGeneration: cancellationGeneration
+        )
+        try await cancellationSession.cancelOperation(cancellationToken)
+        let cancellationEvents = await cancellationRecorder.snapshot()
+        #expect(!cancellationEvents.contains(where: {
+            $0.kind == .history && $0.outcome == .completed
+        }))
     }
 
     @Test("Diagnostics are bounded and structurally identifier-free")

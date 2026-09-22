@@ -1,5 +1,6 @@
 # NOOP Band SDK operations rounds
 
+- [2026-09-22 - PR 17 final remediation](2026-09-22-pr17-final-remediation.md)
 - [2026-09-22 - History token observability](2026-09-22-history-token-observability.md)
 - [2026-09-22 - Security-failure session terminal](2026-09-22-security-failure-session-terminal.md)
 - [2026-09-22 - PR 17 late review remediation](2026-09-22-pr17-late-review-remediation.md)
