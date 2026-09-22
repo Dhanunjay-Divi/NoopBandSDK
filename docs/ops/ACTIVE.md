@@ -13,7 +13,8 @@ Last updated: **2026-09-22**
   procedural, not enforced by a repository rule
 - Active branch: `codex/sdk-conformance-order-20260922`
 - Start commit: `ed681a7a54330d50f0a207690b8cc3566f0f527b`
-- Implementation commit: pending
+- Implementation commit:
+  `4b18e235c1f32a69e3c771581b11082968642d14`
 - PR merge: pending
 - Supplier binaries: absent and prohibited
 - WHOOP application transport: unchanged
