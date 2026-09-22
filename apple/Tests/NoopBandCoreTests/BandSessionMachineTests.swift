@@ -399,6 +399,113 @@ struct BandSessionMachineTests {
         #expect(result.finalState == BandSessionState.ready.rawValue)
     }
 
+    @Test("Invalid history tokens record bounded rejection diagnostics")
+    func invalidHistoryTokensRecordDiagnostics() async throws {
+        let recorder = BandDiagnosticsRecorder()
+        let (session, generation) = try await readySession(
+            diagnostics: recorder
+        )
+        let supersededToken = try await session.beginOperation(.history)
+        try await session.cancelOperation(supersededToken)
+        let activeToken = try await session.beginOperation(.history)
+        let (foreignSession, _) = try await readySession()
+        let foreignToken = try await foreignSession.beginOperation(.history)
+
+        var eventCount = await recorder.snapshot().count
+        await #expect(throws: BandFailureCategory.invalidState) {
+            _ = try await session.stageHistoryChunk(
+                VirtualBandFixtures.historyChunk,
+                token: supersededToken,
+                callbackGeneration: generation
+            )
+        }
+        var events = await recorder.snapshot()
+        #expect(events.count == eventCount + 1)
+        #expect(
+            events.last == BandDiagnosticEvent(
+                kind: .history,
+                outcome: .rejected,
+                failureCategory: .invalidState
+            )
+        )
+
+        eventCount = events.count
+        await #expect(throws: BandFailureCategory.staleCallback) {
+            _ = try await session.stageHistoryChunk(
+                VirtualBandFixtures.historyChunk,
+                token: foreignToken,
+                callbackGeneration: generation
+            )
+        }
+        events = await recorder.snapshot()
+        #expect(events.count == eventCount + 1)
+        #expect(
+            events.last == BandDiagnosticEvent(
+                kind: .history,
+                outcome: .rejected,
+                failureCategory: .staleCallback
+            )
+        )
+
+        let acceptance = try await session.stageHistoryChunk(
+            VirtualBandFixtures.historyChunk,
+            token: activeToken,
+            callbackGeneration: generation
+        )
+        let receipt = DurableHistoryReceipt(
+            acceptance: acceptance,
+            historyStateCommitted: true,
+            committedSamples: acceptance.acceptedSamples,
+            committed: true
+        )
+
+        eventCount = await recorder.snapshot().count
+        await #expect(throws: BandFailureCategory.invalidState) {
+            try await session.acknowledgeHistory(
+                receipt: receipt,
+                token: supersededToken,
+                callbackGeneration: generation
+            )
+        }
+        events = await recorder.snapshot()
+        #expect(events.count == eventCount + 1)
+        #expect(
+            events.last == BandDiagnosticEvent(
+                kind: .history,
+                outcome: .rejected,
+                failureCategory: .invalidState
+            )
+        )
+
+        eventCount = events.count
+        await #expect(throws: BandFailureCategory.staleCallback) {
+            try await session.acknowledgeHistory(
+                receipt: receipt,
+                token: foreignToken,
+                callbackGeneration: generation
+            )
+        }
+        events = await recorder.snapshot()
+        #expect(events.count == eventCount + 1)
+        #expect(
+            events.last == BandDiagnosticEvent(
+                kind: .history,
+                outcome: .rejected,
+                failureCategory: .staleCallback
+            )
+        )
+        let unchanged = await session.snapshot()
+        #expect(unchanged.state == .historyCollecting)
+        #expect(unchanged.activeOperation == .history)
+
+        try await session.acknowledgeHistory(
+            receipt: receipt,
+            token: activeToken,
+            callbackGeneration: generation
+        )
+        try await session.completeOperation(activeToken)
+    }
+
     @Test("Diagnostics are bounded and structurally identifier-free")
     func diagnosticsAreBoundedAndRedacted() async throws {
         let recorder = BandDiagnosticsRecorder(capacity: 2)
@@ -427,5 +534,27 @@ struct BandSessionMachineTests {
         await #expect(throws: BandFailureCategory.invalidInput) {
             try await BandConformanceRunner.run("not-a-scenario")
         }
+    }
+
+    private func readySession(
+        diagnostics: BandDiagnosticsRecorder = BandDiagnosticsRecorder()
+    ) async throws -> (BandSessionMachine, UInt64) {
+        let session = BandSessionMachine(diagnostics: diagnostics)
+        let generation = try await session.beginScan()
+        try await session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            callbackGeneration: generation
+        )
+        try await session.beginConnection(callbackGeneration: generation)
+        try await session.beginAuthentication(callbackGeneration: generation)
+        try await session.completeConnection(
+            VirtualBandFixtures.identity,
+            callbackGeneration: generation
+        )
+        try await session.acceptCapabilities(
+            VirtualBandFixtures.capabilities,
+            callbackGeneration: generation
+        )
+        return (session, generation)
     }
 }
