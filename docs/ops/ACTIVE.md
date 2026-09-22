@@ -4,14 +4,15 @@ Last updated: **2026-09-22**
 
 ## Current round
 
-- [PR 17 post-review lifecycle closeout](rounds/2026-09-22-pr17-post-review-lifecycle-closeout.md)
+- [PR 17 final contract closeout](rounds/2026-09-22-pr17-final-contract-closeout.md)
 
 ## Current boundary
 
 - Protected branch: `main`
-- Active branch: `codex/sdk-pr17-diagnostics-closeout-20260922`
-- Start commit: `8fb464471fdd4ae09d5750feedcc25d50bdb1c20`
-- Implementation commit: pending
+- Active branch: `codex/sdk-pr17-final-followup-20260922`
+- Start commit: `7794bae631c1704e18ae5c341fbc32e89c9dc647`
+- Implementation commit:
+  `b0de1f7efa759b20e09936f60dc743880f877d8c`
 - Protected merge: pending
 - Supplier binaries: absent and prohibited
 - WHOOP application transport: unchanged
@@ -37,17 +38,17 @@ possession proof, firmware flashing, or OTA behavior.
   bucket, and duration bucket only.
 - The diagnostics-only diff passed independent review with no remaining P0-P2
   finding. The live NOOP application PR then reported four inherited lifecycle
-  findings outside that diff. The post-review closeout now binds every
-  connection/authentication/capability callback to the selected candidate,
-  revalidates Swift operation tokens after actor suspension, represents
-  established ready/live authentication failures, and preserves the prior
-  durable cursor on a terminal chunk that omits a new cursor.
+  findings outside that diff. The final closeout additionally revalidates
+  transport authority after Swift actor suspension, preserves pending
+  persistence on established-session failure, separates live and history
+  stream support, and binds retained/lost overflow ranges to the exact durable
+  receipt.
 
 ## Current evidence
 
-- Swift package: 47/47 tests passed.
-- Kotlin/JVM: 52/52 tests passed; `installDist` built successfully.
-- Repository gate: 50 files passed language, binary, JSON, and workflow policy.
+- Swift package: 51/51 tests passed.
+- Kotlin/JVM: 55/55 tests passed; `installDist` built successfully.
+- Repository gate: 51 files passed language, binary, JSON, and workflow policy.
 - JSON validation, bounded secret-pattern scan, and `git diff --check`: passed.
 - Shared conformance: 35/35 Swift/Kotlin scenarios matched.
 - First independent review found one P1 Swift actor-reentrancy issue and two P2

@@ -623,6 +623,33 @@ class BandSessionMachineTest {
 
     @Test
     fun immutableSnapshotsDoNotRetainMutableCallerCollections() {
+        val capabilities =
+            VirtualBandFixtures.capabilities.capabilities.toMutableSet()
+        val liveStreams =
+            VirtualBandFixtures.capabilities.liveStreams.toMutableSet()
+        val historyStreams =
+            VirtualBandFixtures.capabilities.historyStreams.toMutableSet()
+        val reportSnapshot = VirtualBandFixtures.capabilities.copy(
+            capabilities = capabilities,
+            liveStreams = liveStreams,
+            historyStreams = historyStreams,
+        ).immutableSnapshot()
+        capabilities.clear()
+        liveStreams.clear()
+        historyStreams.clear()
+        assertEquals(
+            VirtualBandFixtures.capabilities.capabilities,
+            reportSnapshot.capabilities,
+        )
+        assertEquals(
+            VirtualBandFixtures.capabilities.liveStreams,
+            reportSnapshot.liveStreams,
+        )
+        assertEquals(
+            VirtualBandFixtures.capabilities.historyStreams,
+            reportSnapshot.historyStreams,
+        )
+
         val samples = VirtualBandFixtures.liveBatch.samples.toMutableList()
         val expectedSampleCount = samples.size
         val batch = VirtualBandFixtures.liveBatch.copy(samples = samples)
@@ -653,6 +680,17 @@ class BandSessionMachineTest {
 
     @Test
     fun oversizedSnapshotsRejectBeforeUnboundedTraversal() {
+        val oversizedStreams = IterationForbiddenSet<BandStreamKind>(
+            BandStreamKind.entries.size + 1,
+        )
+        val reportError = assertFailsWith<BandException> {
+            VirtualBandFixtures.capabilities.copy(
+                liveStreams = oversizedStreams,
+            ).immutableSnapshot()
+        }
+        assertEquals(BandFailureCategory.INVALID_INPUT, reportError.category)
+        assertFalse(oversizedStreams.iterationAttempted)
+
         val oversizedSamples = IterationForbiddenList<BandSample>(
             BandContractLimits.SAMPLES_PER_BATCH + 1,
         )
@@ -1108,6 +1146,202 @@ class BandSessionMachineTest {
     }
 
     @Test
+    fun establishedFailureWaitsForPendingLiveReceipt() {
+        val recorder = BandDiagnosticsRecorder()
+        val (session, generation) = readySession(recorder)
+        session.beginLive()
+        val acceptance = session.stageLiveBatch(
+            VirtualBandFixtures.liveBatch,
+            generation,
+        )
+
+        val busy = assertFailsWith<BandException> {
+            session.failEstablishedSession(
+                BandFailureCategory.AUTHENTICATION,
+                generation,
+            )
+        }
+        assertEquals(BandFailureCategory.BUSY, busy.category)
+        val pending = session.snapshot()
+        assertEquals(generation, pending.generation)
+        assertEquals(BandSessionState.LIVE_COLLECTING, pending.state)
+        assertTrue(pending.liveActive)
+        assertEquals(
+            BandDiagnosticEvent(
+                BandDiagnosticKind.AUTHENTICATION,
+                BandDiagnosticOutcome.REJECTED,
+                failureCategory = BandFailureCategory.BUSY,
+            ),
+            recorder.snapshot().last(),
+        )
+
+        session.acknowledgeLive(
+            DurableLiveReceipt(
+                acceptance = acceptance,
+                committedSamples = acceptance.acceptedSamples.size,
+                committed = true,
+            ),
+            generation,
+        )
+        session.failEstablishedSession(
+            BandFailureCategory.AUTHENTICATION,
+            generation,
+        )
+        assertEquals(BandSessionState.REJECTED, session.snapshot().state)
+    }
+
+    @Test
+    fun liveAndHistoryStreamsAreNegotiatedPerLane() {
+        val historyOnly = VirtualBandFixtures.capabilities.copy(
+            liveStreams = emptySet(),
+            historyStreams = setOf(BandStreamKind.HEART_RATE),
+        )
+        val (historySession, historyGeneration) =
+            readySessionWithCapabilities(historyOnly)
+        val liveError = assertFailsWith<BandException> {
+            historySession.beginLive()
+        }
+        assertEquals(BandFailureCategory.UNSUPPORTED, liveError.category)
+
+        val historyToken =
+            historySession.beginOperation(BandOperationClass.HISTORY)
+        val historyAcceptance = historySession.stageHistoryChunk(
+            VirtualBandFixtures.historyChunk,
+            historyToken,
+            historyGeneration,
+        )
+        historySession.acknowledgeHistory(
+            DurableHistoryReceipt(
+                acceptance = historyAcceptance,
+                historyStateCommitted = true,
+                committedSamples = historyAcceptance.acceptedSamples.size,
+                committed = true,
+            ),
+            historyToken,
+            historyGeneration,
+        )
+        historySession.completeOperation(historyToken)
+
+        val liveOnly = VirtualBandFixtures.capabilities.copy(
+            liveStreams = setOf(BandStreamKind.HEART_RATE),
+            historyStreams = emptySet(),
+        )
+        val (liveSession, liveGeneration) =
+            readySessionWithCapabilities(liveOnly)
+        liveSession.beginLive()
+        val liveAcceptance = liveSession.stageLiveBatch(
+            VirtualBandFixtures.liveBatch,
+            liveGeneration,
+        )
+        liveSession.acknowledgeLive(
+            DurableLiveReceipt(
+                acceptance = liveAcceptance,
+                committedSamples = liveAcceptance.acceptedSamples.size,
+                committed = true,
+            ),
+            liveGeneration,
+        )
+        liveSession.stopLive()
+
+        val unsupportedHistoryToken =
+            liveSession.beginOperation(BandOperationClass.HISTORY)
+        val historyError = assertFailsWith<BandException> {
+            liveSession.stageHistoryChunk(
+                VirtualBandFixtures.historyChunk,
+                unsupportedHistoryToken,
+                liveGeneration,
+            )
+        }
+        assertEquals(BandFailureCategory.UNSUPPORTED, historyError.category)
+        liveSession.cancelOperation(unsupportedHistoryToken)
+    }
+
+    @Test
+    fun overflowRangesAreValidatedAndBoundToDurableReceipt() {
+        val (session, generation) = readySession()
+        val token = session.beginOperation(BandOperationClass.HISTORY)
+        val retained = BandHistoryRange(
+            startDeviceTimeMilliseconds = 2_000,
+            endDeviceTimeMilliseconds = 3_000,
+        )
+        val firstLost = BandHistoryRange(
+            startDeviceTimeMilliseconds = 1_000,
+            endDeviceTimeMilliseconds = 1_999,
+        )
+        val valid = VirtualBandFixtures.historyChunk.copy(
+            overflowed = true,
+            retainedRange = retained,
+            firstLostRange = firstLost,
+        )
+
+        listOf(
+            valid.copy(retainedRange = null),
+            valid.copy(firstLostRange = null),
+            valid.copy(
+                overflowed = false,
+                firstLostRange = firstLost,
+            ),
+            valid.copy(
+                retainedRange = BandHistoryRange(
+                    startDeviceTimeMilliseconds = 3_000,
+                    endDeviceTimeMilliseconds = 2_000,
+                ),
+            ),
+        ).forEach { invalid ->
+            val error = assertFailsWith<BandException> {
+                session.stageHistoryChunk(invalid, token, generation)
+            }
+            assertEquals(BandFailureCategory.INVALID_INPUT, error.category)
+        }
+
+        val acceptance =
+            session.stageHistoryChunk(valid, token, generation)
+        assertEquals(retained, acceptance.retainedRange)
+        assertEquals(firstLost, acceptance.firstLostRange)
+
+        val mismatchedAcceptance = HistoryAcceptance(
+            chunkIdentity = acceptance.chunkIdentity,
+            acknowledgementToken = acceptance.acknowledgementToken,
+            nextCursor = acceptance.nextCursor,
+            complete = acceptance.complete,
+            overflowed = acceptance.overflowed,
+            retainedRange = acceptance.retainedRange,
+            firstLostRange = BandHistoryRange(
+                startDeviceTimeMilliseconds = 0,
+                endDeviceTimeMilliseconds = 999,
+            ),
+            acceptedSamples = acceptance.acceptedSamples,
+            duplicateSamples = acceptance.duplicateSamples,
+            sessionNonce = acceptance.sessionNonce,
+            receiptSequence = acceptance.receiptSequence,
+        )
+        val mismatch = assertFailsWith<BandException> {
+            session.acknowledgeHistory(
+                DurableHistoryReceipt(
+                    acceptance = mismatchedAcceptance,
+                    historyStateCommitted = true,
+                    committedSamples = acceptance.acceptedSamples.size,
+                    committed = true,
+                ),
+                token,
+                generation,
+            )
+        }
+        assertEquals(BandFailureCategory.STORAGE, mismatch.category)
+
+        val receipt = DurableHistoryReceipt(
+            acceptance = acceptance,
+            historyStateCommitted = true,
+            committedSamples = acceptance.acceptedSamples.size,
+            committed = true,
+        )
+        assertEquals(retained, receipt.retainedRange)
+        assertEquals(firstLost, receipt.firstLostRange)
+        session.acknowledgeHistory(receipt, token, generation)
+        session.completeOperation(token)
+    }
+
+    @Test
     fun terminalHistoryChunkPreservesCursor() {
         val (session, generation) = readySession()
         val store = VirtualBandStore()
@@ -1120,6 +1354,11 @@ class BandSessionMachineTest {
             nextCursor = "cursor-2",
             complete = false,
             overflowed = false,
+            retainedRange = BandHistoryRange(
+                startDeviceTimeMilliseconds = 2_000,
+                endDeviceTimeMilliseconds = 3_000,
+            ),
+            firstLostRange = null,
             acknowledgementToken = "cursor-seed-ack",
             batches = VirtualBandFixtures.historyChunk.batches,
         )
@@ -1143,6 +1382,8 @@ class BandSessionMachineTest {
             nextCursor = null,
             complete = true,
             overflowed = false,
+            retainedRange = firstChunk.retainedRange,
+            firstLostRange = null,
             acknowledgementToken = "cursor-terminal-ack",
             batches = emptyList(),
         )
@@ -1862,6 +2103,28 @@ class BandSessionMachineTest {
             generation,
         )
         return Triple(session, generation, connectionToken)
+    }
+
+    private fun readySessionWithCapabilities(
+        capabilities: BandCapabilityReport,
+    ): Pair<BandSessionMachine, Long> {
+        val session = BandSessionMachine()
+        val generation = session.beginScan()
+        val connectionToken =
+            session.selectCandidate(VirtualBandFixtures.candidate, generation)
+        session.beginConnection(connectionToken, generation)
+        session.beginAuthentication(connectionToken, generation)
+        session.completeConnection(
+            VirtualBandFixtures.identity,
+            connectionToken,
+            generation,
+        )
+        session.acceptCapabilities(
+            capabilities,
+            connectionToken,
+            generation,
+        )
+        return session to generation
     }
 
     private fun negotiatingSession(
