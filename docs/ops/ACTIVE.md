@@ -4,17 +4,16 @@ Last updated: **2026-09-22**
 
 ## Current round
 
-- [Conformance order contract](rounds/2026-09-22-conformance-order-contract.md)
+- [Late capability state preservation](rounds/2026-09-22-late-capability-state-preservation.md)
 
 ## Current boundary
 
-- Integration branch: `codex/sdk-conformance-order-20260922`
+- Integration branch: `codex/sdk-late-capability-state-20260922`
 - GitHub branch protection: absent as of 2026-09-22; PR-only discipline is
   procedural, not enforced by a repository rule
-- Active branch: `codex/sdk-conformance-order-20260922`
-- Start commit: `ed681a7a54330d50f0a207690b8cc3566f0f527b`
-- Implementation commit:
-  `4b18e235c1f32a69e3c771581b11082968642d14`
+- Active branch: `codex/sdk-late-capability-state-20260922`
+- Start commit: `823930fa16d30ea7849a557823215c913a36fb8b`
+- Implementation commit: pending
 - PR merge: pending
 - Supplier binaries: absent and prohibited
 - WHOOP application transport: unchanged
@@ -66,6 +65,11 @@ possession proof, firmware flashing, or OTA behavior.
   in a different order from the canonical JSON contract. This round aligns the
   Kotlin order, adds structured list output to both executables, and requires
   the shared verifier to compare both ordered lists before invoking scenarios.
+- SDK PR `#19` merged that order contract at `823930fa`. The NOOP application
+  review then found that a malformed delayed Kotlin capability callback could
+  move an already-ready session to `INCOMPATIBLE`. The active correction keeps
+  initial negotiation fail-closed while preserving established session state
+  and recording the same bounded invalid-input rejection for a late callback.
 
 ## Current evidence
 
@@ -119,12 +123,22 @@ possession proof, firmware flashing, or OTA behavior.
     finding identified arbitrary child-stderr forwarding. All three are
     corrected. Two negative regressions and the 38-scenario shared rerun pass;
     scoped re-review reports no remaining P0-P2 issue.
+- Current late-capability correction verification:
+  - Focused malformed delayed-callback regression: passed.
+  - Kotlin/JVM: 63/63 passed; `installDist` built.
+  - Swift package: 55/55 passed.
+  - Shared conformance: 38/38 exact results matched.
+  - Repository gate: 56 files passed.
+  - Swift parse, JSON, diff, and bounded secret-pattern gates: passed.
+  - An independent sub-agent review was requested but no agent slot was
+    available. No independent result is claimed; fresh PR review remains
+    required before merge.
 
 ## Next ordered actions
 
-1. Commit the locally verified correction, push once, and merge normally. Do
-   not claim hosted checks: this repository intentionally has no hosted
-   workflow.
+1. Verify, commit, push once, and merge the late-capability correction
+   normally. Do not claim hosted checks: this repository intentionally has no
+   hosted workflow.
 2. Produce two byte-identical clean source exports from the merge.
 3. Repin NOOP application PR `#17`, compile exported support as a separate
    test target, rerun local artifact/app gates, push once, and require final

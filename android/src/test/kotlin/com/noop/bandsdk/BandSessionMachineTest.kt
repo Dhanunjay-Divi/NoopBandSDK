@@ -657,6 +657,50 @@ class BandSessionMachineTest {
     }
 
     @Test
+    fun malformedLateCapabilityCallbackPreservesReadySession() {
+        val malformedReports = listOf(
+            VirtualBandFixtures.capabilities.copy(
+                capabilities = TraversalFailureSet(BandCapability.BATTERY),
+            ),
+            VirtualBandFixtures.capabilities.copy(
+                capabilities = MutationDuringTraversalSet(
+                    BandCapability.BATTERY,
+                    BandCapability.HAPTICS,
+                ),
+            ),
+        )
+
+        malformedReports.forEach { report ->
+            val recorder = BandDiagnosticsRecorder()
+            val (session, generation, connectionToken) =
+                readySessionWithToken(recorder)
+            val before = session.snapshot()
+
+            val rejected = assertFailsWith<BandException> {
+                session.acceptCapabilities(
+                    report,
+                    connectionToken,
+                    generation,
+                )
+            }
+
+            assertEquals(BandFailureCategory.INVALID_INPUT, rejected.category)
+            assertEquals(before, session.snapshot())
+            assertEquals(
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.CAPABILITY,
+                    BandDiagnosticOutcome.REJECTED,
+                    failureCategory = BandFailureCategory.INVALID_INPUT,
+                ),
+                recorder.snapshot().last(),
+            )
+
+            session.beginLive()
+            assertEquals(BandSessionState.LIVE_COLLECTING, session.snapshot().state)
+        }
+    }
+
+    @Test
     fun acceptanceCollectionsCannotReduceDurableReceiptRequirements() {
         val (session, generation) = readySession()
         val liveToken = session.beginLive()
