@@ -59,6 +59,28 @@ class BandSessionMachineTest {
         }
     }
 
+    private class IterationForbiddenSet<T>(
+        override val size: Int,
+    ) : AbstractSet<T>() {
+        var iterationAttempted = false
+
+        override fun iterator(): Iterator<T> {
+            iterationAttempted = true
+            error("bounded snapshot must reject before iteration")
+        }
+    }
+
+    private class TraversalFailureSet<T>(
+        private val value: T,
+    ) : AbstractSet<T>() {
+        override val size: Int = 1
+
+        override fun iterator(): Iterator<T> = object : Iterator<T> {
+            override fun hasNext(): Boolean = true
+            override fun next(): T = throw ConcurrentModificationException()
+        }
+    }
+
     @Test
     fun deterministicScenariosAreStable() {
         BandConformanceRunner.automatedScenarios.forEach { scenario ->
@@ -422,8 +444,181 @@ class BandSessionMachineTest {
 
         val acceptance = session.stageHistoryChunk(chunk, token, generation)
 
-        assertEquals(2, acceptance.acceptedSamples)
+        assertEquals(
+            listOf(first, second),
+            acceptance.acceptedSamples.map(AcceptedHistorySample::sample),
+        )
         assertEquals(0, acceptance.duplicateSamples)
+    }
+
+    @Test
+    fun historyAcceptanceReturnsOnlyRowsStorageMayPersist() {
+        val (session, generation) = readySession()
+        val store = VirtualBandStore()
+        val duplicate = VirtualBandFixtures.liveBatch.samples.first()
+        val fresh = duplicate.copy(
+            identity = duplicate.identity.copy(
+                sequence = duplicate.identity.sequence + 100,
+                deviceTimeMilliseconds =
+                    duplicate.identity.deviceTimeMilliseconds + 1_000,
+            ),
+            value = duplicate.value + 1,
+        )
+        val secondFresh = duplicate.copy(
+            identity = duplicate.identity.copy(
+                sequence = duplicate.identity.sequence + 101,
+                deviceTimeMilliseconds =
+                    duplicate.identity.deviceTimeMilliseconds + 2_000,
+            ),
+            value = duplicate.value + 2,
+        )
+        session.beginLive()
+        val liveAcceptance = session.stageLiveBatch(
+            VirtualBandFixtures.liveBatch,
+            generation,
+        )
+        session.acknowledgeLive(store.commit(liveAcceptance), generation)
+        session.stopLive()
+
+        val token = session.beginOperation(BandOperationClass.HISTORY)
+        val sourceBatch = VirtualBandFixtures.historyChunk.batches.first()
+        val chunk = VirtualBandFixtures.historyChunk.copy(
+            batches = listOf(
+                sourceBatch.copy(
+                    samples = listOf(duplicate, fresh),
+                ),
+                sourceBatch.copy(
+                    parserRevision = "parser-v2",
+                    calibrationRevision = "calibration-v2",
+                    samples = listOf(fresh, secondFresh),
+                ),
+            ),
+        )
+        val acceptance = session.stageHistoryChunk(chunk, token, generation)
+
+        assertEquals(
+            listOf(fresh, secondFresh),
+            acceptance.acceptedSamples.map(AcceptedHistorySample::sample),
+        )
+        assertEquals(
+            sourceBatch.sourceIdentity,
+            acceptance.acceptedSamples[0].sourceIdentity,
+        )
+        assertEquals(sourceBatch.lane, acceptance.acceptedSamples[0].lane)
+        assertEquals(
+            sourceBatch.parserRevision,
+            acceptance.acceptedSamples[0].parserRevision,
+        )
+        assertEquals(
+            sourceBatch.calibrationRevision,
+            acceptance.acceptedSamples[0].calibrationRevision,
+        )
+        assertEquals("parser-v2", acceptance.acceptedSamples[1].parserRevision)
+        assertEquals(
+            "calibration-v2",
+            acceptance.acceptedSamples[1].calibrationRevision,
+        )
+        assertEquals(2, acceptance.duplicateSamples)
+        assertEquals(2, store.commit(acceptance).committedSamples)
+    }
+
+    @Test
+    fun acceptanceCollectionsCannotReduceDurableReceiptRequirements() {
+        val (session, generation) = readySession()
+        session.beginLive()
+        val liveAcceptance = session.stageLiveBatch(
+            VirtualBandFixtures.liveBatch,
+            generation,
+        )
+        @Suppress("UNCHECKED_CAST")
+        val mutableLive =
+            liveAcceptance.acceptedSamples as MutableList<BandSample>
+        assertFailsWith<UnsupportedOperationException> {
+            mutableLive.clear()
+        }
+        session.acknowledgeLive(
+            DurableLiveReceipt(
+                acceptance = liveAcceptance,
+                committedSamples = liveAcceptance.acceptedSamples.size,
+                committed = true,
+            ),
+            generation,
+        )
+        session.stopLive()
+
+        val token = session.beginOperation(BandOperationClass.HISTORY)
+        val acceptance = session.stageHistoryChunk(
+            VirtualBandFixtures.historyChunk,
+            token,
+            generation,
+        )
+        @Suppress("UNCHECKED_CAST")
+        val mutableHistory =
+            acceptance.acceptedSamples as MutableList<AcceptedHistorySample>
+        assertFailsWith<UnsupportedOperationException> {
+            mutableHistory.clear()
+        }
+        val error = assertFailsWith<BandException> {
+            session.acknowledgeHistory(
+                DurableHistoryReceipt(
+                    acceptance = acceptance,
+                    historyStateCommitted = true,
+                    committedSamples = 0,
+                    committed = true,
+                ),
+                token,
+                generation,
+            )
+        }
+        assertEquals(BandFailureCategory.STORAGE, error.category)
+        assertEquals(null, session.snapshot().acknowledgedHistoryCursor)
+    }
+
+    @Test
+    fun restoredCheckpointSnapshotIsBoundedBeforeTraversal() {
+        val oversized = IterationForbiddenSet<BandSampleIdentity>(
+            BandContractLimits.HISTORY_CHECKPOINT_IDENTITIES + 1,
+        )
+        val oversizedError = assertFailsWith<BandException> {
+            BandSessionMachine(
+                restoredHistoryCheckpoint = BandHistoryCheckpoint(
+                    sourceIdentity = VirtualBandFixtures.identity.sourceIdentity,
+                    acknowledgedCursor = null,
+                    lastHistoryComplete = null,
+                    durableSampleIdentities = oversized,
+                ),
+            )
+        }
+        assertEquals(BandFailureCategory.INVALID_INPUT, oversizedError.category)
+        assertFalse(oversized.iterationAttempted)
+
+        val negative = IterationForbiddenSet<BandSampleIdentity>(-1)
+        val negativeError = assertFailsWith<BandException> {
+            BandSessionMachine(
+                restoredHistoryCheckpoint = BandHistoryCheckpoint(
+                    sourceIdentity = VirtualBandFixtures.identity.sourceIdentity,
+                    acknowledgedCursor = null,
+                    lastHistoryComplete = null,
+                    durableSampleIdentities = negative,
+                ),
+            )
+        }
+        assertEquals(BandFailureCategory.INVALID_INPUT, negativeError.category)
+        assertFalse(negative.iterationAttempted)
+
+        val traversalError = assertFailsWith<BandException> {
+            BandSessionMachine(
+                restoredHistoryCheckpoint = BandHistoryCheckpoint(
+                    sourceIdentity = VirtualBandFixtures.identity.sourceIdentity,
+                    acknowledgedCursor = null,
+                    lastHistoryComplete = null,
+                    durableSampleIdentities = TraversalFailureSet(
+                        VirtualBandFixtures.liveBatch.samples.first().identity,
+                    ),
+                ),
+            )
+        }
+        assertEquals(BandFailureCategory.INVALID_INPUT, traversalError.category)
     }
 
     @Test
@@ -887,7 +1082,7 @@ class BandSessionMachineTest {
             DurableHistoryReceipt(
                 acceptance = historyAcceptance,
                 historyStateCommitted = true,
-                committedSamples = historyAcceptance.acceptedSamples,
+                committedSamples = historyAcceptance.acceptedSamples.size,
                 committed = true,
             ),
             historyToken,
@@ -994,7 +1189,7 @@ class BandSessionMachineTest {
             liveFirstHistoryToken,
             liveGeneration,
         )
-        assertEquals(0, historyAfterLive.acceptedSamples)
+        assertTrue(historyAfterLive.acceptedSamples.isEmpty())
         assertEquals(1, historyAfterLive.duplicateSamples)
         liveFirst.acknowledgeHistory(
             DurableHistoryReceipt(
@@ -1028,7 +1223,7 @@ class BandSessionMachineTest {
             DurableHistoryReceipt(
                 acceptance = historyAcceptance,
                 historyStateCommitted = true,
-                committedSamples = historyAcceptance.acceptedSamples,
+                committedSamples = historyAcceptance.acceptedSamples.size,
                 committed = true,
             ),
             historyFirstToken,
@@ -1114,7 +1309,7 @@ class BandSessionMachineTest {
         val receipt = DurableHistoryReceipt(
             acceptance = acceptance,
             historyStateCommitted = true,
-            committedSamples = acceptance.acceptedSamples,
+            committedSamples = acceptance.acceptedSamples.size,
             committed = true,
         )
 
@@ -1205,7 +1400,7 @@ class BandSessionMachineTest {
             DurableHistoryReceipt(
                 acceptance = acceptance,
                 historyStateCommitted = true,
-                committedSamples = acceptance.acceptedSamples,
+                committedSamples = acceptance.acceptedSamples.size,
                 committed = true,
             ),
             token,
@@ -1241,7 +1436,7 @@ class BandSessionMachineTest {
             DurableHistoryReceipt(
                 acceptance = cancellationAcceptance,
                 historyStateCommitted = true,
-                committedSamples = cancellationAcceptance.acceptedSamples,
+                committedSamples = cancellationAcceptance.acceptedSamples.size,
                 committed = true,
             ),
             cancellationToken,
