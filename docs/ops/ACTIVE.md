@@ -4,16 +4,18 @@ Last updated: **2026-09-22**
 
 ## Current round
 
-- [PR 17 overflow, firmware, and capability closeout](rounds/2026-09-22-pr17-overflow-firmware-capability-closeout.md)
+- [PR 17 final review blockers](rounds/2026-09-22-pr17-final-review-blockers.md)
 
 ## Current boundary
 
-- Protected branch: `main`
-- Active branch: `codex/sdk-pr17-overflow-firmware-closeout-20260922`
-- Start commit: `a8f94b5cbda329eaf7793c5a2cece94fb568acc0`
+- Integration branch: `main`
+- GitHub branch protection: absent as of 2026-09-22; PR-only discipline is
+  procedural, not enforced by a repository rule
+- Active branch: `codex/sdk-pr17-final-blockers-20260922`
+- Start commit: `a486768efb873b57515926740d3efa19787de612`
 - Implementation commit:
-  `fde8068363248418623a8b2805d9a891f3e51f84`
-- Protected merge: pending
+  `47b107be64c27027c10be1f295213609634562d5`
+- PR merge: pending
 - Supplier binaries: absent and prohibited
 - WHOOP application transport: unchanged
 - Production supplier adapter: unavailable pending approved artifacts and
@@ -50,15 +52,31 @@ possession proof, firmware flashing, or OTA behavior.
   independently of fixtures, rejects unsupported future keywords, and enforces
   the normative UTF-8 byte limits. Final independent review found no remaining
   P0-P2 issue.
+- The protected follow-up merged at `a486768`. Exact application review then
+  independently confirmed four remaining defects: non-overflow retained-range
+  validation, Kotlin capability snapshot failure normalization, session-bound
+  live callback authority, and truthful close-phase terminal diagnostics.
 
 ## Current evidence
 
-- Swift package: 52/52 tests passed.
-- Kotlin/JVM: 56/56 tests passed; `installDist` built successfully.
-- Repository gate: 52 files passed language, binary, JSON, capability-schema,
-  and workflow policy.
-- JSON validation, bounded secret-pattern scan, and `git diff --check`: passed.
-- Shared conformance: 36/36 Swift/Kotlin scenarios matched.
+- Protected baseline Swift package: 52/52 tests passed.
+- Protected baseline Kotlin/JVM: 56/56 tests passed; `installDist` built
+  successfully.
+- Protected baseline repository gate: 52 files passed language, binary, JSON,
+  capability-schema, and workflow policy.
+- Protected baseline shared conformance: 36/36 Swift/Kotlin scenarios matched.
+- Current remediation Swift package: 55/55 tests passed.
+- Current remediation Kotlin/JVM: 62/62 tests passed; `installDist` built
+  successfully.
+- Current remediation repository gate: 53 files passed language, binary, JSON,
+  capability-schema, and workflow policy.
+- Current remediation shared conformance: 38/38 Swift/Kotlin scenarios matched.
+- Swift parsing, JSON validation, bounded secret-pattern scan, and
+  `git diff --check`: passed.
+- Local exact-diff review found no remaining P1/P2 issue.
+- Independent agent review unavailable: one reviewer lost AWS credentials and
+  one produced no output before controlled shutdown. No independent result is
+  claimed.
 - First independent review found one P1 Swift actor-reentrancy issue and two P2
   evidence/documentation issues. The implementation and active handoff were
   corrected. Independent review of that exact corrected diff found no
@@ -68,9 +86,10 @@ possession proof, firmware flashing, or OTA behavior.
 
 ## Next ordered actions
 
-1. Push the verified candidate once, open an SDK pull request, require hosted
-   checks, and merge normally without pushing directly to `main`.
-2. Produce two byte-identical clean source exports from the reviewed merge.
-3. Repin NOOP application PR `#17`, rerun its local artifact/app gates, push
-   once, and require the final protected hosted checks.
-4. Keep supplier/physical-device gates explicit and separate.
+1. Push the verified SDK candidate once to a PR. Do not claim hosted
+   checks: this repository intentionally has no hosted workflow.
+2. Merge normally through the PR and produce two
+   byte-identical clean source exports.
+3. Repin NOOP application PR `#17`, rerun local artifact/app gates, push once,
+   and require final protected hosted checks.
+4. Keep supplier and physical-device gates explicit and separate.
