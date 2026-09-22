@@ -509,6 +509,20 @@ def main() -> int:
     ):
         errors.append("hosted workflows require explicit budget approval")
 
+    for relative in (
+        Path("apple/Sources/NoopBandCore/VirtualBand.swift"),
+        Path("android/src/main/kotlin/com/noop/bandsdk/VirtualBand.kt"),
+    ):
+        try:
+            support = (ROOT / relative).read_text(encoding="utf-8")
+        except OSError as error:
+            errors.append(f"export support is unreadable: {relative}: {error}")
+            continue
+        if re.search(r"\bBandLiveToken\s*\(", support):
+            errors.append(
+                f"export support constructs an internal live token: {relative}"
+            )
+
     if errors:
         for error in errors:
             print(f"ERROR: {error}")

@@ -414,6 +414,7 @@ object BandConformanceRunner {
     private fun staleCallbackRejected(): BandConformanceResult {
         val (session, oldGeneration) = readySession()
         val events = mutableListOf("ready")
+        val staleLiveToken = session.beginLive()
         val reconnectGeneration =
             session.interruptForReconnect(oldGeneration)
         session.resumeAfterReconnect(reconnectGeneration)
@@ -422,7 +423,7 @@ object BandConformanceRunner {
         try {
             session.durablyCommitLiveBatch(
                 VirtualBandFixtures.liveBatch,
-                BandLiveToken(java.util.UUID.randomUUID(), oldGeneration, 0),
+                staleLiveToken,
                 oldGeneration,
             )
         } catch (error: BandException) {

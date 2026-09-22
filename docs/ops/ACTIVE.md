@@ -4,17 +4,16 @@ Last updated: **2026-09-22**
 
 ## Current round
 
-- [PR 17 final review blockers](rounds/2026-09-22-pr17-final-review-blockers.md)
+- [Export consumer compatibility](rounds/2026-09-22-export-consumer-compatibility.md)
 
 ## Current boundary
 
-- Integration branch: `main`
+- Integration branch: `codex/sdk-export-consumer-fix-20260922`
 - GitHub branch protection: absent as of 2026-09-22; PR-only discipline is
   procedural, not enforced by a repository rule
-- Active branch: `codex/sdk-pr17-final-blockers-20260922`
-- Start commit: `a486768efb873b57515926740d3efa19787de612`
-- Implementation commit:
-  `47b107be64c27027c10be1f295213609634562d5`
+- Active branch: `codex/sdk-export-consumer-fix-20260922`
+- Start commit: `c533c530bb8615d719b5a2adcf51ec189b6037eb`
+- Implementation commit: pending
 - PR merge: pending
 - Supplier binaries: absent and prohibited
 - WHOOP application transport: unchanged
@@ -56,6 +55,11 @@ possession proof, firmware flashing, or OTA behavior.
   independently confirmed four remaining defects: non-overflow retained-range
   validation, Kotlin capability snapshot failure normalization, session-bound
   live callback authority, and truthful close-phase terminal diagnostics.
+- Protected SDK PR `#17` merged those corrections at `c533c530`. The first
+  source-artifact consumer build then exposed one narrower conformance-support
+  defect: the stale-callback fixture directly constructed an internal live
+  token when compiled outside the core module. This round captures a real live
+  token before reconnect and reuses it after generation advance.
 
 ## Current evidence
 
@@ -83,13 +87,25 @@ possession proof, firmware flashing, or OTA behavior.
   remaining P0-P2 issue.
 - Independent review of the complete post-review lifecycle candidate also
   found no P0-P2 issue.
+- Source-artifact consumer reproduction: failed only because exported Apple
+  virtual-band support called the internal `BandLiveToken` initializer from a
+  separate test target. No production API or app runtime failure was involved.
+- Current compatibility correction verification:
+  - Swift package: 55/55 passed.
+  - Kotlin/JVM: 62/62 passed; `installDist` built.
+  - Shared conformance: 38/38 exact matches.
+  - Repository gate: 54 files passed.
+  - Separate exported-source consumer package: 15/15 passed using only the
+    public module import.
+  - Parse, JSON, diff, and bounded secret-pattern gates: passed.
 
 ## Next ordered actions
 
-1. Push the verified SDK candidate once to a PR. Do not claim hosted
+1. Push the verified compatibility candidate once to a PR. Do not claim hosted
    checks: this repository intentionally has no hosted workflow.
-2. Merge normally through the PR and produce two
-   byte-identical clean source exports.
-3. Repin NOOP application PR `#17`, rerun local artifact/app gates, push once,
-   and require final protected hosted checks.
+2. Merge normally through the PR and produce two byte-identical clean source
+   exports.
+3. Repin NOOP application PR `#17`, compile exported support as a separate
+   test target, rerun local artifact/app gates, push once, and require final
+   protected hosted checks.
 4. Keep supplier and physical-device gates explicit and separate.
