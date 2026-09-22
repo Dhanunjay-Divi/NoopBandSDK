@@ -1,5 +1,6 @@
 # NOOP Band SDK operations rounds
 
+- [2026-09-22 - Conformance order contract](2026-09-22-conformance-order-contract.md)
 - [2026-09-22 - PR 17 final review blockers](2026-09-22-pr17-final-review-blockers.md)
 - [2026-09-22 - PR 17 overflow, firmware, and capability closeout](2026-09-22-pr17-overflow-firmware-capability-closeout.md)
 - [2026-09-22 - PR 17 final contract closeout](2026-09-22-pr17-final-contract-closeout.md)

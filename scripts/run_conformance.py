@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -12,6 +13,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 SCENARIOS = ROOT / "conformance" / "scenarios.json"
+SAFE_SCENARIO = re.compile(r"[a-z][a-z0-9_]{2,63}")
 
 
 class ConformanceError(RuntimeError):
@@ -49,11 +51,11 @@ def default_kotlin_binary() -> Path:
     )
 
 
-def run_binary(binary: Path, scenario: str) -> dict[str, Any]:
+def run_binary_json(binary: Path, argument: str) -> Any:
     if not binary.is_file():
         raise ConformanceError(f"missing executable: {binary}")
     result = subprocess.run(
-        [str(binary), scenario],
+        [str(binary), argument],
         check=False,
         capture_output=True,
         text=True,
@@ -61,15 +63,19 @@ def run_binary(binary: Path, scenario: str) -> dict[str, Any]:
     )
     if result.returncode != 0:
         raise ConformanceError(
-            f"{binary.name} failed scenario {scenario}: "
-            f"{result.stderr.strip()[:200]}"
+            f"{binary.name} failed argument {argument} "
+            f"with exit code {result.returncode}"
         )
     try:
-        payload = json.loads(result.stdout)
+        return json.loads(result.stdout)
     except json.JSONDecodeError as error:
         raise ConformanceError(
-            f"{binary.name} emitted invalid JSON for {scenario}"
+            f"{binary.name} emitted invalid JSON for {argument}"
         ) from error
+
+
+def run_scenario(binary: Path, scenario: str) -> dict[str, Any]:
+    payload = run_binary_json(binary, scenario)
     if not isinstance(payload, dict):
         raise ConformanceError(
             f"{binary.name} emitted a non-object for {scenario}"
@@ -77,16 +83,57 @@ def run_binary(binary: Path, scenario: str) -> dict[str, Any]:
     return payload
 
 
+def run_scenario_list(binary: Path) -> list[str]:
+    payload = run_binary_json(binary, "--list")
+    if (
+        not isinstance(payload, list)
+        or any(not isinstance(item, str) for item in payload)
+    ):
+        raise ConformanceError(
+            f"{binary.name} emitted an invalid scenario list"
+        )
+    return payload
+
+
 def load_automated_scenarios() -> list[dict[str, Any]]:
     payload = json.loads(SCENARIOS.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ConformanceError("scenario contract is invalid")
     scenarios = payload.get("scenarios")
     if payload.get("schemaVersion") != 1 or not isinstance(scenarios, list):
         raise ConformanceError("scenario contract is invalid")
-    automated = [
-        scenario
-        for scenario in scenarios
-        if isinstance(scenario, dict) and scenario.get("automated") is True
-    ]
+
+    automated: list[dict[str, Any]] = []
+    identifiers: set[str] = set()
+    for scenario in scenarios:
+        if not isinstance(scenario, dict):
+            raise ConformanceError("scenario contract entry is invalid")
+        identifier = scenario.get("id")
+        if (
+            not isinstance(identifier, str)
+            or SAFE_SCENARIO.fullmatch(identifier) is None
+            or identifier in identifiers
+        ):
+            raise ConformanceError("scenario contract ID is invalid")
+        identifiers.add(identifier)
+
+        is_automated = scenario.get("automated")
+        if not isinstance(is_automated, bool):
+            raise ConformanceError("scenario automation state is invalid")
+        if is_automated:
+            if not isinstance(scenario.get("expected"), dict):
+                raise ConformanceError(
+                    f"automated scenario entry is invalid: {identifier}"
+                )
+            automated.append(scenario)
+        elif (
+            not isinstance(scenario.get("externalGate"), str)
+            or not scenario["externalGate"]
+        ):
+            raise ConformanceError(
+                f"external scenario gate is invalid: {identifier}"
+            )
+
     if not automated:
         raise ConformanceError("scenario contract has no automated cases")
     return automated
@@ -96,15 +143,31 @@ def verify(
     swift: Path,
     kotlin: Path,
 ) -> int:
+    scenarios = load_automated_scenarios()
+    scenario_ids = [scenario.get("id") for scenario in scenarios]
+    if any(not isinstance(scenario_id, str) for scenario_id in scenario_ids):
+        raise ConformanceError("automated scenario ID is invalid")
+
+    swift_scenarios = run_scenario_list(swift)
+    kotlin_scenarios = run_scenario_list(kotlin)
+    if swift_scenarios != scenario_ids:
+        raise ConformanceError(
+            "Swift published scenario order differs from contract"
+        )
+    if kotlin_scenarios != scenario_ids:
+        raise ConformanceError(
+            "Kotlin published scenario order differs from contract"
+        )
+
     checked = 0
-    for scenario in load_automated_scenarios():
+    for scenario in scenarios:
         scenario_id = scenario.get("id")
         expected = scenario.get("expected")
         if not isinstance(scenario_id, str) or not isinstance(expected, dict):
             raise ConformanceError("automated scenario entry is invalid")
         expected_payload = {"scenario": scenario_id, **expected}
-        swift_payload = run_binary(swift, scenario_id)
-        kotlin_payload = run_binary(kotlin, scenario_id)
+        swift_payload = run_scenario(swift, scenario_id)
+        kotlin_payload = run_scenario(kotlin, scenario_id)
         if swift_payload != expected_payload:
             raise ConformanceError(
                 f"Swift result differs from expected for {scenario_id}"
