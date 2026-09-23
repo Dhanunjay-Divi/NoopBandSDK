@@ -2,11 +2,13 @@
 
 ## Status
 
-- State: `locally verified; committed by this record`
+- State: `hosted-review follow-up locally verified; final commit and push pending`
 - Branch: `codex/sdk-pr17-review-remediation-20260923`
 - Start commit: `3831fb63ae336bd88982586fafc608adda6d6280`
-- Follow-up implementation commit: this commit
-- Pull request: not requested
+- Follow-up implementation commit:
+  `830f9fe1721cc0e842e77b767adecc31ec98ab3b`
+- Hosted-review follow-up commit: this commit
+- Pull request: `#26`
 - Supplier artifacts: absent and prohibited
 - Physical-device claims: unchanged and unproven
 
@@ -37,6 +39,9 @@ operation disconnect is bound to its issuing session and cannot be replayed.
   `reconnect/interrupted` as one recorder batch. After the recorder suspension,
   the operation returns only if the exact recovery state and generation remain
   current.
+- Kotlin firmware disconnect now also appends `firmware/interrupted` and
+  `reconnect/interrupted` through one synchronized recorder batch. This keeps
+  the pair adjacent when one recorder is shared by concurrent sessions.
 - Both platforms directly reject operation-derived reconnect credentials from
   another equal-generation session and reject replay after successful resume.
 
@@ -68,6 +73,9 @@ supplier exception, payload, sample, or health value is recorded.
 - Complete Swift package with one build worker: 75/75 tests passed.
 - Complete Kotlin/JVM with one Gradle worker: 84/84 tests passed and
   `installDist` succeeded.
+- Hosted PR `#26` review identified one valid Kotlin diagnostic-atomicity
+  finding. The focused firmware-disconnect regression passed after the batch
+  correction, then the complete Kotlin/JVM suite and `installDist` succeeded.
 - Shared conformance: all 46 ordered Swift/Kotlin scenarios matched the
   checked-in contract.
 - Repository policy: 63 files passed language, binary, JSON, schema, and
@@ -83,8 +91,9 @@ supplier exception, payload, sample, or health value is recorded.
   `/tmp/noop-band-sdk-pr17-independent-review-followup-20260923`.
 - Swift and Kotlin compiler walls ran sequentially. Observed free disk
   remained approximately 13.4 GiB and never crossed the 10 GiB stop floor.
-- No hosted workflow, push, supplier runtime, source export, application
-  repin, or physical-device result is claimed.
+- Hosted review completed on `830f9fe1`; no hosted workflow, supplier runtime,
+  protected merge, source export, application repin, or physical-device result
+  is claimed yet.
 
 ## External gates
 

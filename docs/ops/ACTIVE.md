@@ -284,13 +284,21 @@ possession proof, firmware flashing, or OTA behavior.
     stop floor;
   - bounded logs are under
     `/tmp/noop-band-sdk-pr17-independent-review-followup-20260923`;
-  - no hosted workflow, push, supplier runtime, export, application repin, or
-    physical-device result is claimed.
+  - SDK PR `#26` review completed on `830f9fe1` and identified one valid P2:
+    Kotlin firmware disconnect emitted the firmware and reconnect interruption
+    through separate recorder calls;
+  - the local correction emits both events through one synchronized recorder
+    batch; its focused regression, complete Kotlin/JVM suite, `installDist`,
+    all 46 shared conformance scenarios, the 63-file repository gate, JSON
+    parsing, and diff hygiene pass;
+  - no hosted workflow, supplier runtime, protected merge, export, application
+    repin, or physical-device result is claimed yet.
 
 ## Next ordered actions
 
-1. Keep the verified implementation committed locally and report its exact
-   SHA. Do not push or open a pull request for this task.
-2. Any later PR, merge, source export, or application repin requires a separate
-   explicit request and fresh exact-head verification.
-3. Keep supplier and physical-device gates explicit and separate.
+1. Commit and push the verified hosted-review correction to PR `#26`.
+2. Resolve the exact review thread, reverify the final PR head, and merge
+   normally.
+3. Export the protected SDK merge twice, verify byte identity, and repin the
+   application candidate.
+4. Keep supplier and physical-device gates explicit and separate.

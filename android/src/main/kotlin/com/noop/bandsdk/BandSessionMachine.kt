@@ -1534,6 +1534,26 @@ class BandSessionMachine(
             invalidateAuthenticatedSession(BandSessionState.FIRMWARE_FAILURE)
         } else if (category == BandFailureCategory.AUTHENTICATION) {
             invalidateAuthenticatedSession(BandSessionState.REJECTED)
+        } else if (
+            token.operationClass == BandOperationClass.FIRMWARE &&
+            category == BandFailureCategory.DISCONNECTED
+        ) {
+            invalidateNegotiationAfterFirmware()
+            diagnostics.record(
+                listOf(
+                    BandDiagnosticEvent(
+                        BandDiagnosticKind.FIRMWARE,
+                        BandDiagnosticOutcome.INTERRUPTED,
+                        failureCategory = BandFailureCategory.DISCONNECTED,
+                    ),
+                    BandDiagnosticEvent(
+                        BandDiagnosticKind.RECONNECT,
+                        BandDiagnosticOutcome.INTERRUPTED,
+                        failureCategory = BandFailureCategory.DISCONNECTED,
+                    ),
+                ),
+            )
+            return null
         } else if (token.operationClass == BandOperationClass.FIRMWARE) {
             invalidateNegotiationAfterFirmware()
         } else if (category == BandFailureCategory.DISCONNECTED) {
@@ -1583,11 +1603,6 @@ class BandSessionMachine(
                 operationDiagnosticKind,
                 if (terminalFirmwareFailure) {
                     BandDiagnosticOutcome.TERMINAL
-                } else if (
-                    token.operationClass == BandOperationClass.FIRMWARE &&
-                    category == BandFailureCategory.DISCONNECTED
-                ) {
-                    BandDiagnosticOutcome.INTERRUPTED
                 } else {
                     BandDiagnosticOutcome.FAILED
                 },
