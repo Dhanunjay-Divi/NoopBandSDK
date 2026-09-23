@@ -4,6 +4,7 @@ Last updated: **2026-09-23**
 
 ## Current round
 
+- [PR 17 final contract closeout](rounds/2026-09-23-pr17-final-contract-closeout.md)
 - [Kotlin public-entry reentry guard](rounds/2026-09-23-kotlin-public-entry-reentry-guard.md)
 - [PR 17 independent-review follow-up](rounds/2026-09-23-pr17-independent-review-followup.md)
 - [PR 17 review remediation](rounds/2026-09-23-pr17-review-remediation.md)
@@ -14,11 +15,11 @@ Last updated: **2026-09-23**
 
 ## Current boundary
 
-- Integration branch: `codex/sdk-reentry-guard-20260923`
+- Integration branch: `codex/sdk-pr17-final-contract-closeout-20260923`
 - GitHub branch protection: absent as of 2026-09-22; PR-only discipline is
   procedural, not enforced by a repository rule
-- Active branch: `codex/sdk-reentry-guard-20260923`
-- Start commit: `eb5d6d4c6171efaa87a8e36a3c4ba3906efbfb2c`
+- Active branch: `codex/sdk-pr17-final-contract-closeout-20260923`
+- Start commit: `586a5c04bd3edbd445895a881c5d4faa78fb526e`
 - Reentry-guard implementation commit:
   `a9b66a9042d95559d9c74e892d13898dc9d79c65`
 - Reviewed implementation commit:
@@ -37,6 +38,19 @@ Last updated: **2026-09-23**
 - WHOOP application transport: unchanged
 - Production supplier adapter: unavailable pending approved artifacts and
   physical evidence
+
+The active closeout introduces capability schema 3 with immutable stream
+semantics and report/parser/calibration provenance, negotiated live-operation
+policy, staged-before-persistence evidence, and operation/disconnect diagnostic
+metadata. Swift connection and live-persistence suspension boundaries are
+authority-fenced. Kotlin normalizes hostile/JVM-null supplier collections,
+retains the historical diagnostic JVM constructor, and has no schema-2
+compatibility constructor that can fabricate provenance. Current exact-source
+evidence is green: Swift `83/83`, Kotlin/JVM plus `installDist`, shared
+conformance `50/50`, repository gate `66` files, JSON, and diff hygiene.
+Independent Apple and Android corrective-delta reviews report no P0-P2
+findings. Commit, normal pull-request integration, protected-source export,
+byte comparison, and application repin remain pending.
 
 This work proves deterministic neutral-core behavior only. It does not prove
 BLE, background execution, flash retention, haptics, battery, sensor accuracy,

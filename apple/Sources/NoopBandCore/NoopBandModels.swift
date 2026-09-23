@@ -104,7 +104,7 @@ public enum BandFailureCategory: String, Codable, Error, Sendable {
     case internalFailure
 }
 
-public enum BandOperationClass: String, Codable, Sendable {
+public enum BandOperationClass: String, Codable, CaseIterable, Sendable {
     case history
     case battery
     case wearState
@@ -165,10 +165,107 @@ public enum BandUnit: String, Codable, Sendable {
     case gravity
 }
 
+func requiredUnit(
+    for stream: BandStreamKind
+) -> BandUnit {
+    switch stream {
+    case .heartRate:
+        return .beatsPerMinute
+    case .rrInterval:
+        return .milliseconds
+    case .steps:
+        return .count
+    case .spo2:
+        return .percent
+    case .respiration:
+        return .breathsPerMinute
+    case .temperature:
+        return .celsius
+    case .acceleration:
+        return .gravity
+    }
+}
+
 public enum BandSampleQuality: String, Codable, Sendable {
     case accepted
     case degraded
     case rejected
+}
+
+public enum BandCadenceKind: String, Codable, Sendable {
+    case periodic
+    case eventDriven
+    case aggregateWindow
+}
+
+public enum BandQualitySemantics: String, Codable, Sendable {
+    case acceptedOrDegraded
+}
+
+public enum BandTimestampSemantics: String, Codable, Sendable {
+    case deviceMilliseconds
+}
+
+public struct BandStreamSemantics:
+    Equatable,
+    Hashable,
+    Codable,
+    Sendable
+{
+    public let lane: BandProvenanceLane
+    public let stream: BandStreamKind
+    public let unit: BandUnit
+    public let cadence: BandCadenceKind
+    public let nominalIntervalMilliseconds: Int?
+    public let quality: BandQualitySemantics
+    public let timestamp: BandTimestampSemantics
+    public let parserRevision: String
+    public let calibrationRevision: String
+
+    public init(
+        lane: BandProvenanceLane,
+        stream: BandStreamKind,
+        unit: BandUnit,
+        cadence: BandCadenceKind,
+        nominalIntervalMilliseconds: Int?,
+        quality: BandQualitySemantics,
+        timestamp: BandTimestampSemantics,
+        parserRevision: String,
+        calibrationRevision: String
+    ) {
+        self.lane = lane
+        self.stream = stream
+        self.unit = unit
+        self.cadence = cadence
+        self.nominalIntervalMilliseconds = nominalIntervalMilliseconds
+        self.quality = quality
+        self.timestamp = timestamp
+        self.parserRevision = parserRevision
+        self.calibrationRevision = calibrationRevision
+    }
+
+    public func validate() throws {
+        let cadenceIsValid: Bool
+        switch cadence {
+        case .eventDriven:
+            cadenceIsValid = nominalIntervalMilliseconds == nil
+        case .periodic, .aggregateWindow:
+            cadenceIsValid = nominalIntervalMilliseconds.map {
+                (1 ... 86_400_000).contains($0)
+            } ?? false
+        }
+        guard unit == requiredUnit(for: stream),
+              cadenceIsValid,
+              parserRevision.hasValidUTF8Length(
+                  maximum: BandContractLimits.revisionLength
+              ),
+              calibrationRevision.hasValidUTF8Length(
+                  maximum: BandContractLimits.revisionLength
+              )
+        else {
+            throw BandFailureCategory.incompatible
+        }
+    }
 }
 
 public struct BandPairingCandidate: Equatable, Sendable {
@@ -345,10 +442,11 @@ public struct BandIdentity: Equatable, Sendable {
 }
 
 public struct BandCapabilityReport: Equatable, Codable, Sendable {
-    public static let supportedSchemaVersion = 2
+    public static let supportedSchemaVersion = 3
     public static let supportedProtocolVersion = "noop-band-v1"
 
     public let schemaVersion: Int
+    public let reportRevision: String
     public let protocolVersion: String
     public let hardwareRevision: String
     public let firmwareVersion: String
@@ -356,8 +454,36 @@ public struct BandCapabilityReport: Equatable, Codable, Sendable {
     public let capabilities: Set<BandCapability>
     public let liveStreams: Set<BandStreamKind>
     public let historyStreams: Set<BandStreamKind>
+    public let operationsAllowedDuringLive: Set<BandOperationClass>
+    public let streamSemantics: [BandStreamSemantics]
 
     public init(
+        schemaVersion: Int,
+        reportRevision: String,
+        protocolVersion: String,
+        hardwareRevision: String,
+        firmwareVersion: String,
+        historyDays: Int,
+        capabilities: Set<BandCapability>,
+        liveStreams: Set<BandStreamKind>,
+        historyStreams: Set<BandStreamKind>,
+        operationsAllowedDuringLive: Set<BandOperationClass>,
+        streamSemantics: [BandStreamSemantics]
+    ) {
+        self.schemaVersion = schemaVersion
+        self.reportRevision = reportRevision
+        self.protocolVersion = protocolVersion
+        self.hardwareRevision = hardwareRevision
+        self.firmwareVersion = firmwareVersion
+        self.historyDays = historyDays
+        self.capabilities = capabilities
+        self.liveStreams = liveStreams
+        self.historyStreams = historyStreams
+        self.operationsAllowedDuringLive = operationsAllowedDuringLive
+        self.streamSemantics = streamSemantics
+    }
+
+    init(
         schemaVersion: Int,
         protocolVersion: String,
         hardwareRevision: String,
@@ -367,18 +493,43 @@ public struct BandCapabilityReport: Equatable, Codable, Sendable {
         liveStreams: Set<BandStreamKind>,
         historyStreams: Set<BandStreamKind>
     ) {
-        self.schemaVersion = schemaVersion
-        self.protocolVersion = protocolVersion
-        self.hardwareRevision = hardwareRevision
-        self.firmwareVersion = firmwareVersion
-        self.historyDays = historyDays
-        self.capabilities = capabilities
-        self.liveStreams = liveStreams
-        self.historyStreams = historyStreams
+        self.init(
+            schemaVersion: schemaVersion,
+            reportRevision: "virtual-report-v1",
+            protocolVersion: protocolVersion,
+            hardwareRevision: hardwareRevision,
+            firmwareVersion: firmwareVersion,
+            historyDays: historyDays,
+            capabilities: capabilities,
+            liveStreams: liveStreams,
+            historyStreams: historyStreams,
+            operationsAllowedDuringLive: Set(
+                BandOperationClass.allCases.filter { $0 != .firmware }
+            ),
+            streamSemantics: Self.virtualStreamSemantics(
+                liveStreams: liveStreams,
+                historyStreams: historyStreams
+            )
+        )
     }
 
     public func validate() throws {
+        let expectedSemantics = Set(
+            liveStreams.map {
+                BandStreamSemanticKey(lane: .live, stream: $0)
+            } + historyStreams.map {
+                BandStreamSemanticKey(lane: .history, stream: $0)
+            }
+        )
+        let actualSemantics = Set(
+            streamSemantics.map {
+                BandStreamSemanticKey(lane: $0.lane, stream: $0.stream)
+            }
+        )
         guard schemaVersion == Self.supportedSchemaVersion,
+              reportRevision.hasValidUTF8Length(
+                  maximum: BandContractLimits.revisionLength
+              ),
               protocolVersion == Self.supportedProtocolVersion,
               hardwareRevision.hasValidUTF8Length(maximum: 32),
               firmwareVersion.hasValidUTF8Length(
@@ -387,13 +538,69 @@ public struct BandCapabilityReport: Equatable, Codable, Sendable {
               (0 ... 255).contains(historyDays),
               !capabilities.isEmpty,
               historyStreams.isEmpty || historyDays > 0,
+              !operationsAllowedDuringLive.contains(.firmware),
+              streamSemantics.count == actualSemantics.count,
+              actualSemantics == expectedSemantics,
               liveStreams.union(historyStreams).allSatisfy({
                   capabilities.contains(requiredCapability(for: $0))
+              }),
+              streamSemantics.allSatisfy({
+                  (try? $0.validate()) != nil
               })
         else {
             throw BandFailureCategory.incompatible
         }
     }
+
+    private static func virtualStreamSemantics(
+        liveStreams: Set<BandStreamKind>,
+        historyStreams: Set<BandStreamKind>
+    ) -> [BandStreamSemantics] {
+        func semantics(
+            lane: BandProvenanceLane,
+            stream: BandStreamKind
+        ) -> BandStreamSemantics {
+            let cadence: BandCadenceKind
+            let nominalIntervalMilliseconds: Int?
+            switch stream {
+            case .rrInterval:
+                cadence = .eventDriven
+                nominalIntervalMilliseconds = nil
+            case .steps:
+                cadence = .aggregateWindow
+                nominalIntervalMilliseconds = 60_000
+            case .acceleration:
+                cadence = .periodic
+                nominalIntervalMilliseconds = 40
+            default:
+                cadence = .periodic
+                nominalIntervalMilliseconds = stream == .heartRate
+                    ? 1_000
+                    : 60_000
+            }
+            return BandStreamSemantics(
+                lane: lane,
+                stream: stream,
+                unit: requiredUnit(for: stream),
+                cadence: cadence,
+                nominalIntervalMilliseconds: nominalIntervalMilliseconds,
+                quality: .acceptedOrDegraded,
+                timestamp: .deviceMilliseconds,
+                parserRevision: "parser-v1",
+                calibrationRevision: "calibration-v1"
+            )
+        }
+        return liveStreams.map {
+            semantics(lane: .live, stream: $0)
+        } + historyStreams.map {
+            semantics(lane: .history, stream: $0)
+        }
+    }
+}
+
+private struct BandStreamSemanticKey: Hashable {
+    let lane: BandProvenanceLane
+    let stream: BandStreamKind
 }
 
 public struct BandSampleIdentity: Hashable, Codable, Sendable {
@@ -707,6 +914,9 @@ public struct LiveAcceptance:
 {
     public let acceptedSamples: [BandSample]
     public let duplicateSamples: Int
+    public let capabilityReportRevision: String
+    public let parserRevision: String
+    public let calibrationRevision: String
     let sessionNonce: UUID
     let generation: UInt64
     let receiptSequence: UInt64
@@ -714,12 +924,18 @@ public struct LiveAcceptance:
     init(
         acceptedSamples: [BandSample],
         duplicateSamples: Int,
+        capabilityReportRevision: String,
+        parserRevision: String,
+        calibrationRevision: String,
         sessionNonce: UUID,
         generation: UInt64,
         receiptSequence: UInt64
     ) {
         self.acceptedSamples = acceptedSamples
         self.duplicateSamples = duplicateSamples
+        self.capabilityReportRevision = capabilityReportRevision
+        self.parserRevision = parserRevision
+        self.calibrationRevision = calibrationRevision
         self.sessionNonce = sessionNonce
         self.generation = generation
         self.receiptSequence = receiptSequence
@@ -743,13 +959,19 @@ public struct AcceptedHistorySample:
     public let lane: BandProvenanceLane
     public let parserRevision: String
     public let calibrationRevision: String
+    public let capabilityReportRevision: String
     public let sample: BandSample
 
-    init(batch: BandSampleBatch, sample: BandSample) {
+    init(
+        batch: BandSampleBatch,
+        capabilityReportRevision: String,
+        sample: BandSample
+    ) {
         sourceIdentity = batch.sourceIdentity
         lane = batch.lane
         parserRevision = batch.parserRevision
         calibrationRevision = batch.calibrationRevision
+        self.capabilityReportRevision = capabilityReportRevision
         self.sample = sample
     }
 

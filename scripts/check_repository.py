@@ -70,6 +70,7 @@ SCHEMA_KEYWORDS = SCHEMA_ANNOTATIONS | {
     "allOf",
     "if",
     "then",
+    "not",
     "const",
     "enum",
     "minLength",
@@ -80,6 +81,7 @@ SCHEMA_KEYWORDS = SCHEMA_ANNOTATIONS | {
     "uniqueItems",
     "items",
     "x-noop-maxUtf8Bytes",
+    "x-noop-exactStreamSemantics",
 }
 SCHEMA_TYPES = {"object", "array", "string", "integer"}
 
@@ -135,7 +137,7 @@ def validate_schema_definition(
         for index, child in enumerate(all_of):
             validate_schema_definition(child, f"{path}.allOf[{index}]")
 
-    for keyword in ("if", "then", "items"):
+    for keyword in ("if", "then", "not", "items"):
         if keyword in schema:
             validate_schema_definition(
                 schema[keyword],
@@ -178,6 +180,62 @@ def validate_schema_definition(
         raise ValueError(f"{path}: minimum exceeds maximum")
     if "uniqueItems" in schema and not isinstance(schema["uniqueItems"], bool):
         raise ValueError(f"{path}: uniqueItems is not a boolean")
+    if (
+        "x-noop-exactStreamSemantics" in schema
+        and not isinstance(schema["x-noop-exactStreamSemantics"], bool)
+    ):
+        raise ValueError(
+            f"{path}: x-noop-exactStreamSemantics is not a boolean"
+        )
+
+
+def validate_exact_stream_semantics(
+    instance: object,
+    path: str,
+) -> None:
+    if not isinstance(instance, dict):
+        raise SchemaValidationError(
+            f"{path}: exact stream semantics require an object"
+        )
+    live_streams = instance.get("liveStreams")
+    history_streams = instance.get("historyStreams")
+    semantics = instance.get("streamSemantics")
+    if (
+        not isinstance(live_streams, list)
+        or not isinstance(history_streams, list)
+        or not isinstance(semantics, list)
+    ):
+        raise SchemaValidationError(
+            f"{path}: exact stream semantics inputs are malformed"
+        )
+
+    expected = {
+        ("live", stream)
+        for stream in live_streams
+    } | {
+        ("history", stream)
+        for stream in history_streams
+    }
+    actual: list[tuple[object, object]] = []
+    for index, semantic in enumerate(semantics):
+        if not isinstance(semantic, dict):
+            raise SchemaValidationError(
+                f"{path}.streamSemantics[{index}]: expected object"
+            )
+        actual.append((semantic.get("lane"), semantic.get("stream")))
+
+    if len(actual) != len(set(actual)):
+        raise SchemaValidationError(
+            f"{path}.streamSemantics: duplicate lane/stream entry"
+        )
+    actual_set = set(actual)
+    missing = expected - actual_set
+    extra = actual_set - expected
+    if missing or extra:
+        raise SchemaValidationError(
+            f"{path}.streamSemantics: missing {sorted(missing)!r}; "
+            f"extra {sorted(extra)!r}"
+        )
 
 
 def validate_schema_subset(
@@ -234,6 +292,17 @@ def validate_schema_subset(
         if condition_matches and "then" in schema:
             validate_schema_subset(schema["then"], instance, f"{path}.then")
 
+    negated = schema.get("not")
+    if negated is not None:
+        try:
+            validate_schema_subset(negated, instance, f"{path}.not")
+        except SchemaValidationError:
+            pass
+        else:
+            raise SchemaValidationError(
+                f"{path}: matched prohibited schema"
+            )
+
     if isinstance(instance, dict):
         required = schema.get("required", [])
         if not isinstance(required, list) or not all(
@@ -263,6 +332,8 @@ def validate_schema_subset(
                     instance[key],
                     f"{path}.{key}",
                 )
+        if schema.get("x-noop-exactStreamSemantics") is True:
+            validate_exact_stream_semantics(instance, path)
 
     if isinstance(instance, str):
         minimum_length = schema.get("minLength")
@@ -371,51 +442,219 @@ def main() -> int:
             schema_path.read_text(encoding="utf-8")
         )
         validate_schema_definition(capability_schema)
+        live_heart_rate = {
+            "lane": "live",
+            "stream": "heartRate",
+            "unit": "beatsPerMinute",
+            "cadence": "periodic",
+            "nominalIntervalMilliseconds": 1000,
+            "quality": "acceptedOrDegraded",
+            "timestamp": "deviceMilliseconds",
+            "parserRevision": "parser-v1",
+            "calibrationRevision": "calibration-v1",
+        }
+        live_rr = {
+            "lane": "live",
+            "stream": "rrInterval",
+            "unit": "milliseconds",
+            "cadence": "eventDriven",
+            "quality": "acceptedOrDegraded",
+            "timestamp": "deviceMilliseconds",
+            "parserRevision": "parser-v1",
+            "calibrationRevision": "calibration-v1",
+        }
+        history_heart_rate = {
+            **live_heart_rate,
+            "lane": "history",
+            "cadence": "aggregateWindow",
+            "nominalIntervalMilliseconds": 60000,
+        }
         live_only = {
-            "schemaVersion": 2,
+            "schemaVersion": 3,
+            "reportRevision": "report-v1",
             "protocolVersion": "noop-band-v1",
             "hardwareRevision": "hw-1",
             "firmwareVersion": "fw-1",
             "historyDays": 0,
-            "capabilities": ["heart_rate"],
-            "liveStreams": ["heartRate"],
+            "capabilities": ["heart_rate", "rr_intervals"],
+            "liveStreams": ["heartRate", "rrInterval"],
             "historyStreams": [],
+            "operationsAllowedDuringLive": ["battery", "haptic"],
+            "streamSemantics": [live_heart_rate, live_rr],
         }
         history = {
             **live_only,
             "historyDays": 7,
             "historyStreams": ["heartRate"],
+            "streamSemantics": [
+                live_heart_rate,
+                live_rr,
+                history_heart_rate,
+            ],
         }
         validate_schema_subset(capability_schema, live_only)
         validate_schema_subset(capability_schema, history)
-        try:
-            validate_schema_subset(
-                capability_schema,
-                {
-                    **history,
-                    "historyDays": 0,
+
+        def expect_capability_rejection(
+            description: str,
+            payload: object,
+        ) -> None:
+            try:
+                validate_schema_subset(capability_schema, payload)
+            except SchemaValidationError:
+                return
+            errors.append(f"capability schema accepted {description}")
+
+        expect_capability_rejection(
+            "zero-retention history",
+            {
+                **history,
+                "historyDays": 0,
+            },
+        )
+        expect_capability_rejection(
+            "oversized UTF-8 metadata",
+            {
+                **live_only,
+                "hardwareRevision": "\u00e9" * 17,
+            },
+        )
+        for required_v3_field in (
+            "reportRevision",
+            "operationsAllowedDuringLive",
+            "streamSemantics",
+        ):
+            missing_field = dict(live_only)
+            del missing_field[required_v3_field]
+            expect_capability_rejection(
+                f"missing required v3 field {required_v3_field}",
+                missing_field,
+            )
+        expect_capability_rejection(
+            "stale schema revision",
+            {
+                **live_only,
+                "schemaVersion": 2,
+            },
+        )
+        expect_capability_rejection(
+            "malformed report revision shape",
+            {
+                **live_only,
+                "reportRevision": {
+                    "revision": "report-v1",
                 },
-            )
-        except SchemaValidationError:
-            pass
-        else:
-            errors.append(
-                "capability schema accepted zero-retention history"
-            )
-        try:
-            validate_schema_subset(
-                capability_schema,
-                {
-                    **live_only,
-                    "hardwareRevision": "\u00e9" * 17,
-                },
-            )
-        except SchemaValidationError:
-            pass
-        else:
-            errors.append(
-                "capability schema accepted oversized UTF-8 metadata"
-            )
+            },
+        )
+        expect_capability_rejection(
+            "missing stream semantics entry",
+            {
+                **live_only,
+                "streamSemantics": [live_heart_rate],
+            },
+        )
+        malformed_semantic = dict(live_heart_rate)
+        del malformed_semantic["quality"]
+        expect_capability_rejection(
+            "malformed stream semantics entry",
+            {
+                **live_only,
+                "streamSemantics": [
+                    malformed_semantic,
+                    live_rr,
+                ],
+            },
+        )
+        wrong_unit_semantic = {
+            **live_heart_rate,
+            "unit": "milliseconds",
+        }
+        expect_capability_rejection(
+            "stream semantics with a mismatched unit",
+            {
+                **live_only,
+                "streamSemantics": [
+                    wrong_unit_semantic,
+                    live_rr,
+                ],
+            },
+        )
+        duplicate_semantic = {
+            **live_heart_rate,
+            "parserRevision": "parser-v2",
+        }
+        expect_capability_rejection(
+            "duplicate lane/stream semantics",
+            {
+                **live_only,
+                "streamSemantics": [
+                    live_heart_rate,
+                    duplicate_semantic,
+                    live_rr,
+                ],
+            },
+        )
+        expect_capability_rejection(
+            "extra lane/stream semantics",
+            {
+                **live_only,
+                "streamSemantics": [
+                    live_heart_rate,
+                    live_rr,
+                    history_heart_rate,
+                ],
+            },
+        )
+        malformed_revision_semantic = {
+            **live_rr,
+            "parserRevision": 1,
+        }
+        expect_capability_rejection(
+            "malformed semantic revision shape",
+            {
+                **live_only,
+                "streamSemantics": [
+                    live_heart_rate,
+                    malformed_revision_semantic,
+                ],
+            },
+        )
+        event_driven_with_interval = {
+            **live_rr,
+            "nominalIntervalMilliseconds": 1000,
+        }
+        expect_capability_rejection(
+            "event-driven semantics with a nominal interval",
+            {
+                **live_only,
+                "streamSemantics": [
+                    live_heart_rate,
+                    event_driven_with_interval,
+                ],
+            },
+        )
+        periodic_without_interval = dict(live_heart_rate)
+        del periodic_without_interval["nominalIntervalMilliseconds"]
+        expect_capability_rejection(
+            "periodic semantics without a nominal interval",
+            {
+                **live_only,
+                "streamSemantics": [
+                    periodic_without_interval,
+                    live_rr,
+                ],
+            },
+        )
+        expect_capability_rejection(
+            "firmware in the live-operation allowlist",
+            {
+                **live_only,
+                "operationsAllowedDuringLive": [
+                    "battery",
+                    "firmware",
+                ],
+            },
+        )
         unsupported_schema = json.loads(json.dumps(capability_schema))
         unsupported_schema["properties"]["futureOptional"] = {
             "pattern": ".*"

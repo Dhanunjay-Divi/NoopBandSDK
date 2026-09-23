@@ -700,8 +700,8 @@ struct BandSessionMachineTests {
                 BandSampleBatch(
                     sourceIdentity: sourceBatch.sourceIdentity,
                     lane: sourceBatch.lane,
-                    parserRevision: "parser-v2",
-                    calibrationRevision: "calibration-v2",
+                    parserRevision: sourceBatch.parserRevision,
+                    calibrationRevision: sourceBatch.calibrationRevision,
                     samples: [fresh, secondFresh]
                 ),
             ]
@@ -720,9 +720,14 @@ struct BandSessionMachineTests {
             == sourceBatch.parserRevision)
         #expect(acceptance.acceptedSamples[0].calibrationRevision
             == sourceBatch.calibrationRevision)
-        #expect(acceptance.acceptedSamples[1].parserRevision == "parser-v2")
+        #expect(acceptance.acceptedSamples[1].parserRevision
+            == sourceBatch.parserRevision)
         #expect(acceptance.acceptedSamples[1].calibrationRevision
-            == "calibration-v2")
+            == sourceBatch.calibrationRevision)
+        #expect(acceptance.acceptedSamples.allSatisfy {
+            $0.capabilityReportRevision
+                == VirtualBandFixtures.capabilities.reportRevision
+        })
         #expect(acceptance.duplicateSamples == 2)
         #expect(await store.commit(acceptance: acceptance).committedSamples == 2)
     }
@@ -741,6 +746,463 @@ struct BandSessionMachineTests {
         #expect(result.events.contains("stale_phases_preserved"))
         #expect(result.events.contains("connection_diagnostics_bounded"))
         #expect(result.finalState == BandSessionState.ready.rawValue)
+    }
+
+    @Test("Connection completion revalidates after close")
+    func connectionCompletionRevalidatesAfterClose() async throws {
+        let recorder = BandDiagnosticsRecorder(capacity: 64)
+        let session = BandSessionMachine(diagnostics: recorder)
+        let scanToken = try await session.beginScan()
+        let generation = scanToken.generation
+        let connectionToken = try await session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            callbackGeneration: scanToken
+        )
+        try await session.beginConnection(
+            token: connectionToken,
+            callbackGeneration: generation
+        )
+        try await session.beginAuthentication(
+            token: connectionToken,
+            callbackGeneration: generation
+        )
+        await recorder.requestNextRecordSuspensionForTesting()
+
+        let completion = Task {
+            try await session.completeConnection(
+                VirtualBandFixtures.identity,
+                token: connectionToken,
+                callbackGeneration: generation
+            )
+        }
+        await recorder.waitForRecordSuspensionForTesting()
+        try await session.close()
+        await recorder.resumeSuspendedRecordForTesting()
+
+        await #expect(throws: BandFailureCategory.staleCallback) {
+            try await completion.value
+        }
+        #expect(await session.snapshot().state == .closed)
+    }
+
+    @Test("Connection completion revalidates after capability cancellation")
+    func connectionCompletionRevalidatesAfterCapabilityCancellation()
+        async throws
+    {
+        let recorder = BandDiagnosticsRecorder(capacity: 64)
+        let session = BandSessionMachine(diagnostics: recorder)
+        let scanToken = try await session.beginScan()
+        let generation = scanToken.generation
+        let connectionToken = try await session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            callbackGeneration: scanToken
+        )
+        try await session.beginConnection(
+            token: connectionToken,
+            callbackGeneration: generation
+        )
+        try await session.beginAuthentication(
+            token: connectionToken,
+            callbackGeneration: generation
+        )
+        await recorder.requestNextRecordSuspensionForTesting()
+
+        let completion = Task {
+            try await session.completeConnection(
+                VirtualBandFixtures.identity,
+                token: connectionToken,
+                callbackGeneration: generation
+            )
+        }
+        await recorder.waitForRecordSuspensionForTesting()
+        try await session.cancelCapabilities(
+            token: connectionToken,
+            callbackGeneration: generation
+        )
+        await recorder.resumeSuspendedRecordForTesting()
+
+        await #expect(throws: BandFailureCategory.staleCallback) {
+            try await completion.value
+        }
+        #expect(await session.snapshot().state == .idle)
+    }
+
+    @Test("Connection completion permits valid capability progress")
+    func connectionCompletionPermitsValidCapabilityProgress() async throws {
+        let recorder = BandDiagnosticsRecorder(capacity: 64)
+        let session = BandSessionMachine(diagnostics: recorder)
+        let scanToken = try await session.beginScan()
+        let generation = scanToken.generation
+        let connectionToken = try await session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            callbackGeneration: scanToken
+        )
+        try await session.beginConnection(
+            token: connectionToken,
+            callbackGeneration: generation
+        )
+        try await session.beginAuthentication(
+            token: connectionToken,
+            callbackGeneration: generation
+        )
+        await recorder.requestNextRecordSuspensionForTesting()
+
+        let completion = Task {
+            try await session.completeConnection(
+                VirtualBandFixtures.identity,
+                token: connectionToken,
+                callbackGeneration: generation
+            )
+        }
+        await recorder.waitForRecordSuspensionForTesting()
+        try await session.acceptCapabilities(
+            VirtualBandFixtures.capabilities,
+            token: connectionToken,
+            callbackGeneration: generation
+        )
+        await recorder.resumeSuspendedRecordForTesting()
+
+        try await completion.value
+        #expect(await session.snapshot().state == .ready)
+        #expect(
+            !(await recorder.snapshot()).contains {
+                $0.kind == .authentication
+                    && $0.outcome == .stale
+                    && $0.failureCategory == .staleCallback
+            }
+        )
+    }
+
+    @Test("Live operations follow negotiated concurrency")
+    func liveOperationsFollowNegotiatedConcurrency() async throws {
+        let base = VirtualBandFixtures.capabilities
+        let report = BandCapabilityReport(
+            schemaVersion: base.schemaVersion,
+            reportRevision: base.reportRevision,
+            protocolVersion: base.protocolVersion,
+            hardwareRevision: base.hardwareRevision,
+            firmwareVersion: base.firmwareVersion,
+            historyDays: base.historyDays,
+            capabilities: base.capabilities,
+            liveStreams: base.liveStreams,
+            historyStreams: base.historyStreams,
+            operationsAllowedDuringLive: [.battery],
+            streamSemantics: base.streamSemantics
+        )
+        let recorder = BandDiagnosticsRecorder()
+        let (session, _) = try await readySession(
+            capabilities: report,
+            diagnostics: recorder
+        )
+        let liveToken = try await session.beginLive()
+
+        let battery = try await session.beginOperation(.battery)
+        try await session.cancelOperation(battery)
+        await #expect(throws: BandFailureCategory.busy) {
+            _ = try await session.beginOperation(.haptic)
+        }
+        #expect(
+            await recorder.snapshot().last
+                == BandDiagnosticEvent(
+                    kind: .command,
+                    outcome: .rejected,
+                    failureCategory: .busy,
+                    operationClass: .haptic
+                )
+        )
+        try await session.stopLive(token: liveToken)
+    }
+
+    @Test("Negotiated stream semantics reject revision drift before staging")
+    func negotiatedStreamSemanticsRejectRevisionDriftBeforeStaging()
+        async throws
+    {
+        let (session, generation) = try await readySession()
+        let liveToken = try await session.beginLive()
+        let mismatches = [
+            BandSampleBatch(
+                sourceIdentity:
+                    VirtualBandFixtures.liveBatch.sourceIdentity,
+                lane: .live,
+                parserRevision: "parser-v2",
+                calibrationRevision:
+                    VirtualBandFixtures.liveBatch.calibrationRevision,
+                samples: VirtualBandFixtures.liveBatch.samples
+            ),
+            BandSampleBatch(
+                sourceIdentity:
+                    VirtualBandFixtures.liveBatch.sourceIdentity,
+                lane: .live,
+                parserRevision:
+                    VirtualBandFixtures.liveBatch.parserRevision,
+                calibrationRevision: "calibration-v2",
+                samples: VirtualBandFixtures.liveBatch.samples
+            ),
+        ]
+        for mismatch in mismatches {
+            await #expect(throws: BandFailureCategory.unsupported) {
+                _ = try await session.stageLiveBatch(
+                    mismatch,
+                    token: liveToken,
+                    callbackGeneration: generation
+                )
+            }
+            #expect(await session.snapshot().state == .liveCollecting)
+        }
+        try await session.stopLive(token: liveToken)
+
+        let operation = try await session.beginOperation(.history)
+        let source = try #require(
+            VirtualBandFixtures.historyChunk.batches.first
+        )
+        let mismatchedBatch = BandSampleBatch(
+            sourceIdentity: source.sourceIdentity,
+            lane: .history,
+            parserRevision: source.parserRevision,
+            calibrationRevision: "calibration-v2",
+            samples: source.samples
+        )
+        let mismatchedChunk = BandHistoryChunk(
+            chunkIdentity: VirtualBandFixtures.historyChunk.chunkIdentity,
+            previousCursor:
+                VirtualBandFixtures.historyChunk.previousCursor,
+            nextCursor: VirtualBandFixtures.historyChunk.nextCursor,
+            complete: VirtualBandFixtures.historyChunk.complete,
+            overflowed: VirtualBandFixtures.historyChunk.overflowed,
+            retainedRange:
+                VirtualBandFixtures.historyChunk.retainedRange,
+            firstLostRange:
+                VirtualBandFixtures.historyChunk.firstLostRange,
+            acknowledgementToken:
+                VirtualBandFixtures.historyChunk.acknowledgementToken,
+            batches: [mismatchedBatch]
+        )
+        await #expect(throws: BandFailureCategory.unsupported) {
+            _ = try await session.stageHistoryChunk(
+                mismatchedChunk,
+                token: operation,
+                callbackGeneration: generation
+            )
+        }
+        #expect(await session.snapshot().activeOperation == .history)
+        try await session.cancelOperation(operation)
+    }
+
+    @Test("Live staging precedes durable completion and reports duplicates")
+    func liveStagingPrecedesDurableCompletionAndReportsDuplicates()
+        async throws
+    {
+        let recorder = BandDiagnosticsRecorder()
+        let (session, generation) = try await readySession(
+            diagnostics: recorder
+        )
+        let liveToken = try await session.beginLive()
+        let first = try await session.stageLiveBatch(
+            VirtualBandFixtures.liveBatch,
+            token: liveToken,
+            callbackGeneration: generation
+        )
+        var liveEvents = await recorder.snapshot().filter {
+            $0.kind == .live
+        }
+        #expect(
+            liveEvents.contains(
+                BandDiagnosticEvent(
+                    kind: .live,
+                    outcome: .staged,
+                    countBucket: .one
+                )
+            )
+        )
+        #expect(!liveEvents.contains { $0.outcome == .completed })
+        try await session.acknowledgeLive(
+            receipt: DurableLiveReceipt(
+                acceptance: first,
+                committedSamples: 1,
+                committed: true
+            ),
+            callbackGeneration: generation
+        )
+
+        let duplicate = try await session.stageLiveBatch(
+            VirtualBandFixtures.liveBatch,
+            token: liveToken,
+            callbackGeneration: generation
+        )
+        #expect(duplicate.acceptedSamples.isEmpty)
+        liveEvents = await recorder.snapshot().filter {
+            $0.kind == .live
+        }
+        #expect(
+            liveEvents == [
+                BandDiagnosticEvent(kind: .live, outcome: .began),
+                BandDiagnosticEvent(
+                    kind: .live,
+                    outcome: .staged,
+                    countBucket: .one
+                ),
+                BandDiagnosticEvent(
+                    kind: .live,
+                    outcome: .completed,
+                    countBucket: .one
+                ),
+                BandDiagnosticEvent(
+                    kind: .live,
+                    outcome: .staged,
+                    countBucket: .zero
+                ),
+            ]
+        )
+        #expect(
+            !liveEvents.contains(
+                BandDiagnosticEvent(
+                    kind: .live,
+                    outcome: .completed,
+                    countBucket: .zero
+                )
+            )
+        )
+        try await session.acknowledgeLive(
+            receipt: DurableLiveReceipt(
+                acceptance: duplicate,
+                committedSamples: 0,
+                committed: true
+            ),
+            callbackGeneration: generation
+        )
+        liveEvents = await recorder.snapshot().filter {
+            $0.kind == .live
+        }
+        #expect(
+            liveEvents.last == BandDiagnosticEvent(
+                kind: .live,
+                outcome: .completed,
+                countBucket: .zero
+            )
+        )
+        try await session.stopLive(token: liveToken)
+    }
+
+    @Test("Live completion fences the next batch until evidence is recorded")
+    func liveCompletionFencesNextBatchUntilEvidenceIsRecorded()
+        async throws
+    {
+        let recorder = BandDiagnosticsRecorder(capacity: 64)
+        let (session, generation) = try await readySession(
+            diagnostics: recorder
+        )
+        let liveToken = try await session.beginLive()
+        let first = try await session.stageLiveBatch(
+            VirtualBandFixtures.liveBatch,
+            token: liveToken,
+            callbackGeneration: generation
+        )
+        await recorder.requestNextRecordSuspensionForTesting()
+
+        let completion = Task {
+            try await session.acknowledgeLive(
+                receipt: DurableLiveReceipt(
+                    acceptance: first,
+                    committedSamples: 1,
+                    committed: true
+                ),
+                callbackGeneration: generation
+            )
+        }
+        await recorder.waitForRecordSuspensionForTesting()
+
+        let nextBatch = BandSampleBatch(
+            sourceIdentity: VirtualBandFixtures.identity.sourceIdentity,
+            lane: .live,
+            parserRevision: "parser-v1",
+            calibrationRevision: "calibration-v1",
+            samples: [
+                BandSample(
+                    identity: BandSampleIdentity(
+                        stream: .heartRate,
+                        sequence: 2,
+                        deviceTimeMilliseconds: 2_000
+                    ),
+                    value: 73,
+                    unit: .beatsPerMinute,
+                    quality: .accepted
+                ),
+            ]
+        )
+        await #expect(throws: BandFailureCategory.busy) {
+            _ = try await session.stageLiveBatch(
+                nextBatch,
+                token: liveToken,
+                callbackGeneration: generation
+            )
+        }
+
+        await recorder.resumeSuspendedRecordForTesting()
+        try await completion.value
+        let second = try await session.stageLiveBatch(
+            nextBatch,
+            token: liveToken,
+            callbackGeneration: generation
+        )
+        let liveEvents = await recorder.snapshot().filter {
+            $0.kind == .live
+        }
+        let completedIndex = try #require(
+            liveEvents.lastIndex {
+                $0.outcome == .completed && $0.countBucket == .one
+            }
+        )
+        let stagedIndex = try #require(
+            liveEvents.lastIndex {
+                $0.outcome == .staged && $0.countBucket == .one
+            }
+        )
+        #expect(completedIndex < stagedIndex)
+
+        try await session.acknowledgeLive(
+            receipt: DurableLiveReceipt(
+                acceptance: second,
+                committedSamples: 1,
+                committed: true
+            ),
+            callbackGeneration: generation
+        )
+        try await session.stopLive(token: liveToken)
+    }
+
+    @Test("Disconnect diagnostics preserve every reason")
+    func disconnectDiagnosticsPreserveEveryReason() async throws {
+        for reason in [
+            BandDisconnectReason.userPaused,
+            .collectorHandoff,
+            .transportReplaced,
+        ] {
+            let recorder = BandDiagnosticsRecorder()
+            let (session, generation) = try await readySession(
+                diagnostics: recorder
+            )
+            let eventCount = await recorder.snapshot().count
+
+            _ = try await session.disconnect(
+                reason: reason,
+                callbackGeneration: generation
+            )
+
+            #expect(
+                Array(await recorder.snapshot().dropFirst(eventCount)) == [
+                    BandDiagnosticEvent(
+                        kind: .disconnect,
+                        outcome: .began,
+                        disconnectReason: reason
+                    ),
+                    BandDiagnosticEvent(
+                        kind: .disconnect,
+                        outcome: .completed,
+                        disconnectReason: reason
+                    ),
+                ]
+            )
+        }
     }
 
     @Test("Connection and authentication have explicit terminals")
@@ -951,7 +1413,8 @@ struct BandSessionMachineTests {
                 BandDiagnosticEvent(
                     kind: .command,
                     outcome: .stale,
-                    failureCategory: .staleCallback
+                    failureCategory: .staleCallback,
+                    operationClass: .battery
                 )
             )
         )
@@ -1019,7 +1482,8 @@ struct BandSessionMachineTests {
             events.contains(
                 BandDiagnosticEvent(
                     kind: .history,
-                    outcome: .cancelled
+                    outcome: .cancelled,
+                    operationClass: .history
                 )
             )
         )
@@ -1044,7 +1508,8 @@ struct BandSessionMachineTests {
                 BandDiagnosticEvent(
                     kind: .disconnect,
                     outcome: .stale,
-                    failureCategory: .staleCallback
+                    failureCategory: .staleCallback,
+                    disconnectReason: .userPaused
                 )
             )
         )
@@ -1152,7 +1617,8 @@ struct BandSessionMachineTests {
             events.contains(
                 BandDiagnosticEvent(
                     kind: .disconnect,
-                    outcome: .completed
+                    outcome: .completed,
+                    disconnectReason: .userPaused
                 )
             )
         )
@@ -1349,7 +1815,8 @@ struct BandSessionMachineTests {
             BandDiagnosticEvent(
                 kind: .command,
                 outcome: .interrupted,
-                failureCategory: .disconnected
+                failureCategory: .disconnected,
+                operationClass: .battery
             ),
             BandDiagnosticEvent(kind: .live, outcome: .interrupted),
             BandDiagnosticEvent(kind: .reconnect, outcome: .interrupted),
@@ -1380,7 +1847,8 @@ struct BandSessionMachineTests {
                 BandDiagnosticEvent(
                     kind: .command,
                     outcome: .failed,
-                    failureCategory: .disconnected
+                    failureCategory: .disconnected,
+                    operationClass: .battery
                 ),
                 BandDiagnosticEvent(kind: .live, outcome: .interrupted),
                 BandDiagnosticEvent(
@@ -1472,7 +1940,8 @@ struct BandSessionMachineTests {
                 BandDiagnosticEvent(
                     kind: .firmware,
                     outcome: .interrupted,
-                    failureCategory: .disconnected
+                    failureCategory: .disconnected,
+                    operationClass: .firmware
                 ),
                 BandDiagnosticEvent(
                     kind: .reconnect,
@@ -1530,7 +1999,8 @@ struct BandSessionMachineTests {
                 BandDiagnosticEvent(
                     kind: .firmware,
                     outcome: .interrupted,
-                    failureCategory: .disconnected
+                    failureCategory: .disconnected,
+                    operationClass: .firmware
                 ),
                 BandDiagnosticEvent(
                     kind: .reconnect,
@@ -1544,7 +2014,8 @@ struct BandSessionMachineTests {
                 BandDiagnosticEvent(
                     kind: .firmware,
                     outcome: .stale,
-                    failureCategory: .staleCallback
+                    failureCategory: .staleCallback,
+                    operationClass: .firmware
                 ),
             ]
         )
@@ -2140,7 +2611,8 @@ struct BandSessionMachineTests {
         #expect(liveEvents.contains(BandDiagnosticEvent(
             kind: .command,
             outcome: .rejected,
-            failureCategory: .busy
+            failureCategory: .busy,
+            operationClass: .battery
         )))
         #expect(liveEvents.contains(BandDiagnosticEvent(
             kind: .reconnect,

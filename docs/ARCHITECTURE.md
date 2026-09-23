@@ -51,9 +51,27 @@ has:
 
 Firmware update is additionally excluded while live collection is active. The
 collector must stop live delivery before requesting an update token.
+Capability schema 3 declares every other operation class that may coexist with
+live collection. Absence from that allowlist fails closed as busy on both
+platforms.
 Every active operation has an explicit success, cancellation, or categorized
 failure terminal. A terminal history receipt ends that history range; the
 adapter cannot submit another chunk on the same operation.
+
+## Negotiated sample semantics
+
+Every advertised `(lane, stream)` pair has exactly one immutable semantic
+record containing unit, cadence, quality, timestamp meaning, parser revision,
+and calibration revision. The accepted capability report has its own revision.
+Live acceptances and history persistence rows carry those revisions so the app
+can reject drift before storage and can later identify the exact interpretation
+used for a durable value.
+
+The SDK records a fixed-count staged event after validating and fencing an
+accepted live batch but before application persistence begins. A durable
+completion remains distinct until the receipt is acknowledged. Only fully
+acknowledged adjacent live cycles may coalesce; a pending staged event cannot
+replace or move ahead of an earlier completion.
 
 ## Durable history
 
