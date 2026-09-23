@@ -5,6 +5,8 @@
 - State: `locally verified; commit and protected integration pending`
 - Branch: `codex/sdk-reentry-guard-20260923`
 - Start commit: `eb5d6d4c6171efaa87a8e36a3c4ba3906efbfb2c`
+- Implementation commit:
+  `a9b66a9042d95559d9c74e892d13898dc9d79c65`
 - Supplier artifacts: absent and prohibited
 - Physical-device claims: unchanged and unproven
 

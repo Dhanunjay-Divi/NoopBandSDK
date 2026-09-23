@@ -19,6 +19,8 @@ Last updated: **2026-09-23**
   procedural, not enforced by a repository rule
 - Active branch: `codex/sdk-reentry-guard-20260923`
 - Start commit: `eb5d6d4c6171efaa87a8e36a3c4ba3906efbfb2c`
+- Reentry-guard implementation commit:
+  `a9b66a9042d95559d9c74e892d13898dc9d79c65`
 - Reviewed implementation commit:
   `3831fb63ae336bd88982586fafc608adda6d6280`
 - Last hosted-reviewed implementation commit:
