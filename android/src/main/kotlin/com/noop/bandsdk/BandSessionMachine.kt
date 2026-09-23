@@ -19,6 +19,27 @@ class BandSessionMachine(
         val expectedSampleCount: Int,
     )
 
+    private data class CallerTraversalFence(
+        val state: BandSessionState,
+        val generation: Long,
+        val nextConnectionSequence: Long,
+        val nextReconnectSequence: Long,
+        val nextOperationSequence: Long,
+        val nextLiveSequence: Long,
+        val nextLiveReceiptSequence: Long,
+        val nextHistoryReceiptSequence: Long,
+        val activeScanToken: BandScanToken?,
+        val activeConnectionToken: BandConnectionToken?,
+        val activeReconnectToken: BandReconnectToken?,
+        val activeOperation: BandOperationToken?,
+        val activeLiveToken: BandLiveToken?,
+        val liveActive: Boolean,
+        val identity: BandIdentity?,
+        val capabilityReport: BandCapabilityReport?,
+        val pendingLive: PendingLive?,
+        val pendingHistory: PendingHistory?,
+    )
+
     private val restoredHistoryCheckpoint =
         restoredHistoryCheckpoint?.immutableSnapshot()
     private val sessionNonce = UUID.randomUUID()
@@ -462,9 +483,14 @@ class BandSessionMachine(
             callbackGeneration,
             BandDiagnosticKind.CAPABILITY,
         )
+        val traversalFence = captureCallerTraversalFence()
         val immutableReport = try {
             report.immutableSnapshot()
         } catch (_: BandException) {
+            validateCallerTraversalFence(
+                traversalFence,
+                BandDiagnosticKind.CAPABILITY,
+            )
             if (state == BandSessionState.NEGOTIATING_CAPABILITIES) {
                 state = BandSessionState.INCOMPATIBLE
                 capabilityReport = null
@@ -478,6 +504,10 @@ class BandSessionMachine(
             )
             fail(BandFailureCategory.INVALID_INPUT)
         }
+        validateCallerTraversalFence(
+            traversalFence,
+            BandDiagnosticKind.CAPABILITY,
+        )
         val currentIdentity = identity
         val identityMatches =
             currentIdentity?.hardwareRevision == immutableReport.hardwareRevision &&
@@ -694,11 +724,16 @@ class BandSessionMachine(
             )
             fail(BandFailureCategory.BUSY)
         }
+        val traversalFence = captureCallerTraversalFence()
         val negotiatedStreams = capabilityReport?.liveStreams.orEmpty()
         val selectedStreams = try {
             requestedStreams?.boundedSnapshot(BandStreamKind.entries.size)
                 ?: negotiatedStreams
         } catch (_: BandException) {
+            validateCallerTraversalFence(
+                traversalFence,
+                BandDiagnosticKind.LIVE,
+            )
             diagnostics.record(
                 BandDiagnosticEvent(
                     BandDiagnosticKind.LIVE,
@@ -708,6 +743,10 @@ class BandSessionMachine(
             )
             fail(BandFailureCategory.INVALID_INPUT)
         }
+        validateCallerTraversalFence(
+            traversalFence,
+            BandDiagnosticKind.LIVE,
+        )
         if (
             selectedStreams.isEmpty() ||
             !negotiatedStreams.containsAll(selectedStreams)
@@ -838,11 +877,16 @@ class BandSessionMachine(
             )
             fail(BandFailureCategory.BUSY)
         }
+        val traversalFence = captureCallerTraversalFence()
         val immutableBatch = try {
             batch.immutableSnapshot().also {
                 it.validate(BandProvenanceLane.LIVE)
             }
         } catch (error: BandException) {
+            validateCallerTraversalFence(
+                traversalFence,
+                BandDiagnosticKind.LIVE,
+            )
             diagnostics.record(
                 BandDiagnosticEvent(
                     BandDiagnosticKind.LIVE,
@@ -852,6 +896,10 @@ class BandSessionMachine(
             )
             throw error
         }
+        validateCallerTraversalFence(
+            traversalFence,
+            BandDiagnosticKind.LIVE,
+        )
         validateNegotiatedStreams(
             immutableBatch.samples,
             BandDiagnosticKind.LIVE,
@@ -1114,9 +1162,14 @@ class BandSessionMachine(
             )
             fail(BandFailureCategory.INVALID_STATE)
         }
+        val traversalFence = captureCallerTraversalFence()
         val immutableChunk = try {
             chunk.immutableSnapshot().also(BandHistoryChunk::validate)
         } catch (error: BandException) {
+            validateCallerTraversalFence(
+                traversalFence,
+                BandDiagnosticKind.HISTORY,
+            )
             diagnostics.record(
                 BandDiagnosticEvent(
                     BandDiagnosticKind.HISTORY,
@@ -1126,6 +1179,10 @@ class BandSessionMachine(
             )
             throw error
         }
+        validateCallerTraversalFence(
+            traversalFence,
+            BandDiagnosticKind.HISTORY,
+        )
         validateNegotiatedStreams(
             immutableChunk.batches.flatMap(BandSampleBatch::samples),
             BandDiagnosticKind.HISTORY,
@@ -1955,6 +2012,63 @@ class BandSessionMachine(
     private fun ensureNotClosed() {
         if (state == BandSessionState.CLOSED) {
             fail(BandFailureCategory.CLOSED)
+        }
+    }
+
+    private fun captureCallerTraversalFence(): CallerTraversalFence =
+        CallerTraversalFence(
+            state = state,
+            generation = generation,
+            nextConnectionSequence = nextConnectionSequence,
+            nextReconnectSequence = nextReconnectSequence,
+            nextOperationSequence = nextOperationSequence,
+            nextLiveSequence = nextLiveSequence,
+            nextLiveReceiptSequence = nextLiveReceiptSequence,
+            nextHistoryReceiptSequence = nextHistoryReceiptSequence,
+            activeScanToken = activeScanToken,
+            activeConnectionToken = activeConnectionToken,
+            activeReconnectToken = activeReconnectToken,
+            activeOperation = activeOperation,
+            activeLiveToken = activeLiveToken,
+            liveActive = liveActive,
+            identity = identity,
+            capabilityReport = capabilityReport,
+            pendingLive = pendingLive,
+            pendingHistory = pendingHistory,
+        )
+
+    private fun validateCallerTraversalFence(
+        expected: CallerTraversalFence,
+        diagnosticKind: BandDiagnosticKind,
+    ) {
+        if (
+            state != expected.state ||
+            generation != expected.generation ||
+            nextConnectionSequence != expected.nextConnectionSequence ||
+            nextReconnectSequence != expected.nextReconnectSequence ||
+            nextOperationSequence != expected.nextOperationSequence ||
+            nextLiveSequence != expected.nextLiveSequence ||
+            nextLiveReceiptSequence != expected.nextLiveReceiptSequence ||
+            nextHistoryReceiptSequence != expected.nextHistoryReceiptSequence ||
+            activeScanToken !== expected.activeScanToken ||
+            activeConnectionToken !== expected.activeConnectionToken ||
+            activeReconnectToken !== expected.activeReconnectToken ||
+            activeOperation !== expected.activeOperation ||
+            activeLiveToken !== expected.activeLiveToken ||
+            liveActive != expected.liveActive ||
+            identity !== expected.identity ||
+            capabilityReport !== expected.capabilityReport ||
+            pendingLive !== expected.pendingLive ||
+            pendingHistory !== expected.pendingHistory
+        ) {
+            diagnostics.record(
+                BandDiagnosticEvent(
+                    diagnosticKind,
+                    BandDiagnosticOutcome.STALE,
+                    failureCategory = BandFailureCategory.STALE_CALLBACK,
+                ),
+            )
+            fail(BandFailureCategory.STALE_CALLBACK)
         }
     }
 

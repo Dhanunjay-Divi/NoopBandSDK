@@ -1402,6 +1402,47 @@ struct BandSessionMachineTests {
         #expect(await session.snapshot().state == .ready)
     }
 
+    @Test("Operation-derived reconnect authority is session-bound and single-use")
+    func operationDerivedReconnectAuthorityRejectsCrossSessionAndReplay() async throws {
+        let (session, _) = try await readySession()
+        let (foreignSession, _) = try await readySession()
+        let operation = try await session.beginOperation(.battery)
+        let foreignOperation =
+            try await foreignSession.beginOperation(.battery)
+        let authorityResult = try await session.failOperation(
+            operation,
+            category: .disconnected
+        )
+        let foreignAuthorityResult =
+            try await foreignSession.failOperation(
+                foreignOperation,
+                category: .disconnected
+            )
+        let authority = try #require(authorityResult)
+        let foreignAuthority = try #require(foreignAuthorityResult)
+        #expect(authority.generation == foreignAuthority.generation)
+
+        await #expect(throws: BandFailureCategory.staleCallback) {
+            _ = try await session.resumeAfterReconnect(
+                token: foreignAuthority,
+                callbackGeneration: authority.generation
+            )
+        }
+        #expect(await session.snapshot().state == .recovering)
+
+        _ = try await session.resumeAfterReconnect(
+            token: authority,
+            callbackGeneration: authority.generation
+        )
+        await #expect(throws: BandFailureCategory.staleCallback) {
+            _ = try await session.resumeAfterReconnect(
+                token: authority,
+                callbackGeneration: authority.generation
+            )
+        }
+        #expect(await session.snapshot().state == .ready)
+    }
+
     @Test("Firmware disconnect requires full rediscovery")
     func firmwareDisconnectRequiresFullRediscovery() async throws {
         let recorder = BandDiagnosticsRecorder()
@@ -1447,6 +1488,66 @@ struct BandSessionMachineTests {
         let recoveryScanToken = try await session.beginScan()
         #expect(recoveryScanToken.generation == generation + 2)
         #expect(await session.snapshot().state == .scanning)
+    }
+
+    @Test("Firmware disconnect batch revalidates after a recovery scan race")
+    func firmwareDisconnectBatchRevalidatesAfterRecoveryScanRace() async throws {
+        let recorder = BandDiagnosticsRecorder(capacity: 64)
+        let (session, generation, _) =
+            try await readySessionWithToken(
+                capabilities: firmwareCapabilities,
+                diagnostics: recorder
+            )
+        let operation = try await session.beginOperation(.firmware)
+        let eventCount = await recorder.snapshot().count
+        await recorder.requestNextRecordSuspensionForTesting()
+
+        let failureTask = Task {
+            try await session.failOperation(
+                operation,
+                category: .disconnected
+            )
+        }
+        await recorder.waitForRecordSuspensionForTesting()
+        let recovering = await session.snapshot()
+        #expect(recovering.state == .recovering)
+        #expect(recovering.generation == generation + 1)
+
+        let scanToken = try await session.beginScan()
+        #expect(scanToken.generation == generation + 2)
+        #expect(await session.snapshot().state == .scanning)
+
+        await recorder.resumeSuspendedRecordForTesting()
+        await #expect(throws: BandFailureCategory.staleCallback) {
+            _ = try await failureTask.value
+        }
+
+        let scanned = await session.snapshot()
+        #expect(scanned.state == .scanning)
+        #expect(scanned.generation == scanToken.generation)
+        #expect(
+            Array(await recorder.snapshot().dropFirst(eventCount)) == [
+                BandDiagnosticEvent(
+                    kind: .firmware,
+                    outcome: .interrupted,
+                    failureCategory: .disconnected
+                ),
+                BandDiagnosticEvent(
+                    kind: .reconnect,
+                    outcome: .interrupted,
+                    failureCategory: .disconnected
+                ),
+                BandDiagnosticEvent(
+                    kind: .discovery,
+                    outcome: .began
+                ),
+                BandDiagnosticEvent(
+                    kind: .firmware,
+                    outcome: .stale,
+                    failureCategory: .staleCallback
+                ),
+            ]
+        )
     }
 
     @Test("Reconnect token survives live start during diagnostics")

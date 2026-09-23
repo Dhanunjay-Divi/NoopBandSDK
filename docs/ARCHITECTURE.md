@@ -98,6 +98,10 @@ capability negotiation. Other operation terminals return no reconnect
 credential. Recovery from connection, capability, and firmware failures
 invalidates negotiation state and intentionally requires a fresh `beginScan`;
 those paths cannot be resumed with a generation alone.
+Firmware disconnect records `firmware/interrupted` and
+`reconnect/interrupted` in one ordered batch. Swift revalidates the exact
+recovering state and generation after that diagnostic suspension, so a
+concurrent recovery scan remains authoritative.
 
 All bounded protocol strings use UTF-8 byte length on Apple and Android.
 Sample sequence values use `0 ... Int64.max`, and device time is a non-negative
@@ -106,7 +110,10 @@ those domains before they reach application storage. Kotlin snapshots every
 supplier-owned list or set through a bounded traversal before validation.
 Advertised oversize, traversal overflow, collection exceptions, and JVM null
 elements fail as fixed `invalidInput` without retaining the caller-owned
-collection.
+collection. Every monitor-held caller-owned traversal captures session state,
+generation, exact active credentials, and issuance sequences, then revalidates
+them before mutation. The restored-checkpoint constructor snapshot occurs
+before the session instance is published and has no reentrant session target.
 
 ## Health and data boundary
 

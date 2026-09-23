@@ -1518,6 +1518,36 @@ public actor BandSessionMachine {
             invalidateAuthenticatedSession(nextState: .firmwareFailure)
         } else if category == .authentication {
             invalidateAuthenticatedSession(nextState: .rejected)
+        } else if token.operationClass == .firmware,
+                  category == .disconnected
+        {
+            invalidateNegotiationAfterFirmware()
+            let recoveryGeneration = generation
+            await diagnostics.record([
+                BandDiagnosticEvent(
+                    kind: .firmware,
+                    outcome: .interrupted,
+                    failureCategory: .disconnected
+                ),
+                BandDiagnosticEvent(
+                    kind: .reconnect,
+                    outcome: .interrupted,
+                    failureCategory: .disconnected
+                ),
+            ])
+            guard state == .recovering,
+                  generation == recoveryGeneration
+            else {
+                await diagnostics.record(
+                    BandDiagnosticEvent(
+                        kind: .firmware,
+                        outcome: .stale,
+                        failureCategory: .staleCallback
+                    )
+                )
+                throw BandFailureCategory.staleCallback
+            }
+            return nil
         } else if token.operationClass == .firmware {
             invalidateNegotiationAfterFirmware()
         } else if category == .disconnected {
@@ -1577,10 +1607,6 @@ public actor BandSessionMachine {
         let operationOutcome: BandDiagnosticOutcome
         if terminalFirmwareFailure {
             operationOutcome = .terminal
-        } else if token.operationClass == .firmware,
-                  category == .disconnected
-        {
-            operationOutcome = .interrupted
         } else {
             operationOutcome = .failed
         }

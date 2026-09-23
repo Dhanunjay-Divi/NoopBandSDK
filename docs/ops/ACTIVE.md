@@ -4,6 +4,7 @@ Last updated: **2026-09-23**
 
 ## Current round
 
+- [PR 17 independent-review follow-up](rounds/2026-09-23-pr17-independent-review-followup.md)
 - [PR 17 review remediation](rounds/2026-09-23-pr17-review-remediation.md)
 - [Established-session callback authority](rounds/2026-09-23-established-session-authority.md)
 - [Scan-token consumption parity](rounds/2026-09-23-scan-token-consumption-parity.md)
@@ -17,7 +18,9 @@ Last updated: **2026-09-23**
   procedural, not enforced by a repository rule
 - Active branch: `codex/sdk-pr17-review-remediation-20260923`
 - Start commit: `650c89e45ca2ab28e14e76e447a7026479e42b4e`
-- Implementation commit: this commit
+- Reviewed implementation commit:
+  `3831fb63ae336bd88982586fafc608adda6d6280`
+- Follow-up implementation commit: this commit
 - Pull request: not requested
 - Supplier binaries: absent and prohibited
 - WHOOP application transport: unchanged
@@ -112,6 +115,11 @@ possession proof, firmware flashing, or OTA behavior.
   Both platforms record live interruption before clearing live state. Kotlin
   bounded-snapshots requested streams and rejects hostile or JVM-null
   supplier-owned collections as fixed `invalidInput`.
+- The independent-review follow-up revalidates Kotlin state, generation, exact
+  callback authority, and issuance sequences after every monitor-held
+  caller-owned collection snapshot. Swift records firmware and reconnect
+  interruption as one ordered batch and rejects a stale terminal return if a
+  recovery scan advances during the diagnostic suspension.
 
 ## Current evidence
 
@@ -219,8 +227,8 @@ possession proof, firmware flashing, or OTA behavior.
     stale before the original call returns, and proves the valid connection
     token remains usable;
   - corrected exact-diff re-review found no remaining P0-P2 issue;
-  - commit, PR, merge, deterministic export, and application repin remain
-    pending.
+  - SDK PR `#24` subsequently merged at `f20f4ed`; no commit, PR, or merge
+    action for that historical round remains pending.
 - Current established-session authority correction:
   - Swift package passes 69/69 tests;
   - Kotlin/JVM tests and `installDist` pass;
@@ -240,8 +248,8 @@ possession proof, firmware flashing, or OTA behavior.
   - two independently generated source exports from implementation head
     `2281b366` are byte-identical; the candidate manifest SHA-256 is
     `d980188805fc7e1424501c365773e0b65542c163077d481fa266b91925d563ac`;
-  - publication commit, PR, merge, deterministic exports, and application
-    repin remain pending.
+  - SDK PR `#25` subsequently merged at `650c89e` after evidence commit
+    `e016c3c`; its publication commit, pull request, and merge are complete.
 - Current PR 17 review remediation:
   - focused Swift reconnect/recovery selection passes 4/4;
   - focused Kotlin reconnect/recovery/hostile-input selection passes all six
@@ -257,7 +265,27 @@ possession proof, firmware flashing, or OTA behavior.
     `/tmp/noop-band-sdk-pr17-review-remediation-20260923`;
   - full Swift and Gradle walls were delayed until unrelated Xcode walls
     exited, so no heavy compiler walls overlapped;
-  - no independent review or hosted workflow result is claimed.
+  - independent review of `3831fb63` found three valid follow-up issues in
+    Kotlin traversal reentrancy, Swift firmware diagnostic suspension, and
+    stale PR `#24`/`#25` operations text;
+  - follow-up verification is recorded in the current independent-review
+    round;
+  - no hosted workflow result is claimed.
+- Current PR 17 independent-review follow-up:
+  - focused Swift regressions pass 2/2;
+  - focused Kotlin regressions pass 3/3;
+  - complete Swift passes 75/75 with one build worker;
+  - complete Kotlin/JVM passes 84/84 with one Gradle worker and
+    `installDist` succeeds;
+  - shared conformance passes all 46 ordered scenarios;
+  - repository policy passes 63 files;
+  - JSON parsing, bounded credential review, and diff hygiene pass;
+  - compiler walls ran sequentially and free disk remained above the 10 GiB
+    stop floor;
+  - bounded logs are under
+    `/tmp/noop-band-sdk-pr17-independent-review-followup-20260923`;
+  - no hosted workflow, push, supplier runtime, export, application repin, or
+    physical-device result is claimed.
 
 ## Next ordered actions
 

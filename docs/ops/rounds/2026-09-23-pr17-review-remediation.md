@@ -9,6 +9,10 @@
 - Pull request: not requested
 - Supplier artifacts: absent and prohibited
 - Physical-device claims: unchanged and unproven
+- Independent review of implementation commit
+  `3831fb63ae336bd88982586fafc608adda6d6280` found three valid follow-up
+  issues. Their remediation and evidence are recorded in
+  [PR 17 independent-review follow-up](2026-09-23-pr17-independent-review-followup.md).
 
 ## Objective
 

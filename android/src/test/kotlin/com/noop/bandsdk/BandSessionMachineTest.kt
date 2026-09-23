@@ -128,6 +128,58 @@ class BandSessionMachineTest {
         }
     }
 
+    private class ReentrantTraversalList<T>(
+        private val values: List<T>,
+        private val onFirstElement: () -> Unit,
+    ) : AbstractList<T>() {
+        override val size: Int
+            get() = values.size
+
+        override fun get(index: Int): T = values[index]
+
+        override fun iterator(): Iterator<T> {
+            val delegate = values.iterator()
+            var invoked = false
+            return object : Iterator<T> {
+                override fun hasNext(): Boolean = delegate.hasNext()
+
+                override fun next(): T {
+                    val value = delegate.next()
+                    if (!invoked) {
+                        invoked = true
+                        onFirstElement()
+                    }
+                    return value
+                }
+            }
+        }
+    }
+
+    private class ReentrantTraversalSet<T>(
+        private val values: Set<T>,
+        private val onFirstElement: () -> Unit,
+    ) : AbstractSet<T>() {
+        override val size: Int
+            get() = values.size
+
+        override fun iterator(): Iterator<T> {
+            val delegate = values.iterator()
+            var invoked = false
+            return object : Iterator<T> {
+                override fun hasNext(): Boolean = delegate.hasNext()
+
+                override fun next(): T {
+                    val value = delegate.next()
+                    if (!invoked) {
+                        invoked = true
+                        onFirstElement()
+                    }
+                    return value
+                }
+            }
+        }
+    }
+
     @Test
     fun deterministicScenariosAreStable() {
         BandConformanceRunner.automatedScenarios.forEach { scenario ->
@@ -922,6 +974,102 @@ class BandSessionMachineTest {
             )
         }
         assertFalse(oversized.iterationAttempted)
+    }
+
+    @Test
+    fun beginLiveRevalidatesAfterSameThreadRequestedSetReentrancy() {
+        val recorder = BandDiagnosticsRecorder()
+        val (session, generation) = readySession(recorder)
+        val eventCount = recorder.snapshot().size
+        val requested = ReentrantTraversalSet(
+            setOf(BandStreamKind.HEART_RATE),
+        ) {
+            session.close()
+        }
+
+        val error = assertFailsWith<BandException> {
+            session.beginLive(requested)
+        }
+
+        assertEquals(BandFailureCategory.STALE_CALLBACK, error.category)
+        val closed = session.snapshot()
+        assertEquals(BandSessionState.CLOSED, closed.state)
+        assertEquals(generation + 1, closed.generation)
+        assertFalse(closed.liveActive)
+        assertEquals(
+            listOf(
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.LIVE,
+                    BandDiagnosticOutcome.STALE,
+                    failureCategory = BandFailureCategory.STALE_CALLBACK,
+                ),
+            ),
+            recorder.snapshot().drop(eventCount),
+        )
+    }
+
+    @Test
+    fun otherCallerOwnedSnapshotsRevalidateAfterSameThreadReentrancy() {
+        fun assertStale(block: () -> Unit) {
+            val error = assertFailsWith<BandException>(block = block)
+            assertEquals(BandFailureCategory.STALE_CALLBACK, error.category)
+        }
+
+        run {
+            val (session, generation, connectionToken) =
+                negotiatingSessionWithToken()
+            val report = VirtualBandFixtures.capabilities.copy(
+                capabilities = ReentrantTraversalSet(
+                    VirtualBandFixtures.capabilities.capabilities,
+                ) {
+                    session.close()
+                },
+            )
+
+            assertStale {
+                session.acceptCapabilities(
+                    report,
+                    connectionToken,
+                    generation,
+                )
+            }
+            assertEquals(BandSessionState.CLOSED, session.snapshot().state)
+        }
+
+        run {
+            val (session, generation) = readySession()
+            val liveToken = session.beginLive()
+            val batch = VirtualBandFixtures.liveBatch.copy(
+                samples = ReentrantTraversalList(
+                    VirtualBandFixtures.liveBatch.samples,
+                ) {
+                    session.close()
+                },
+            )
+
+            assertStale {
+                session.stageLiveBatch(batch, liveToken, generation)
+            }
+            assertEquals(BandSessionState.CLOSED, session.snapshot().state)
+        }
+
+        run {
+            val (session, generation) = readySession()
+            val operation =
+                session.beginOperation(BandOperationClass.HISTORY)
+            val chunk = VirtualBandFixtures.historyChunk.copy(
+                batches = ReentrantTraversalList(
+                    VirtualBandFixtures.historyChunk.batches,
+                ) {
+                    session.close()
+                },
+            )
+
+            assertStale {
+                session.stageHistoryChunk(chunk, operation, generation)
+            }
+            assertEquals(BandSessionState.CLOSED, session.snapshot().state)
+        }
     }
 
     @Test
@@ -1898,6 +2046,44 @@ class BandSessionMachineTest {
             reconnectAuthority,
             reconnectAuthority.generation,
         )
+        assertEquals(BandSessionState.READY, session.snapshot().state)
+    }
+
+    @Test
+    fun operationDerivedReconnectAuthorityRejectsCrossSessionAndReplay() {
+        val (session, _) = readySession()
+        val (foreignSession, _) = readySession()
+        val authority = requireNotNull(
+            session.failOperation(
+                session.beginOperation(BandOperationClass.BATTERY),
+                BandFailureCategory.DISCONNECTED,
+            ),
+        )
+        val foreignAuthority = requireNotNull(
+            foreignSession.failOperation(
+                foreignSession.beginOperation(BandOperationClass.BATTERY),
+                BandFailureCategory.DISCONNECTED,
+            ),
+        )
+        assertEquals(authority.generation, foreignAuthority.generation)
+
+        val crossSession = assertFailsWith<BandException> {
+            session.resumeAfterReconnect(
+                foreignAuthority,
+                authority.generation,
+            )
+        }
+        assertEquals(
+            BandFailureCategory.STALE_CALLBACK,
+            crossSession.category,
+        )
+        assertEquals(BandSessionState.RECOVERING, session.snapshot().state)
+
+        session.resumeAfterReconnect(authority, authority.generation)
+        val replay = assertFailsWith<BandException> {
+            session.resumeAfterReconnect(authority, authority.generation)
+        }
+        assertEquals(BandFailureCategory.STALE_CALLBACK, replay.category)
         assertEquals(BandSessionState.READY, session.snapshot().state)
     }
 
