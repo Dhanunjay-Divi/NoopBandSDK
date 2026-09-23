@@ -681,10 +681,12 @@ public actor BandSessionMachine {
 
     public func failEstablishedSession(
         _ category: BandFailureCategory,
+        token: BandConnectionToken,
         callbackGeneration: UInt64
     ) async throws {
         try ensureNotClosed()
-        try await validateCallbackGeneration(
+        try await validateConnectionToken(
+            token,
             callbackGeneration,
             diagnosticKind: .authentication
         )
@@ -805,8 +807,9 @@ public actor BandSessionMachine {
         return token
     }
 
-    public func stopLive() async throws {
+    public func stopLive(token: BandLiveToken) async throws {
         try ensureNotClosed()
+        try await validateLiveToken(token)
         guard liveActive else {
             await diagnostics.record(
                 BandDiagnosticEvent(

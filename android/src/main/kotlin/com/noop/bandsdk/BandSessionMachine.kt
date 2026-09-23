@@ -603,10 +603,12 @@ class BandSessionMachine(
     @Synchronized
     fun failEstablishedSession(
         category: BandFailureCategory,
+        token: BandConnectionToken,
         callbackGeneration: Long,
     ) {
         ensureNotClosed()
-        validateCallbackGeneration(
+        validateConnectionToken(
+            token,
             callbackGeneration,
             BandDiagnosticKind.AUTHENTICATION,
         )
@@ -724,8 +726,9 @@ class BandSessionMachine(
     }
 
     @Synchronized
-    fun stopLive() {
+    fun stopLive(token: BandLiveToken) {
         ensureNotClosed()
+        validateLiveToken(token)
         if (!liveActive) {
             diagnostics.record(
                 BandDiagnosticEvent(

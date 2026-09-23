@@ -4,19 +4,19 @@ Last updated: **2026-09-23**
 
 ## Current round
 
+- [Established-session callback authority](rounds/2026-09-23-established-session-authority.md)
 - [Scan-token consumption parity](rounds/2026-09-23-scan-token-consumption-parity.md)
 - [Kotlin scan-token identity](rounds/2026-09-23-kotlin-scan-token-identity.md)
 - [Application PR 17 exact-head remediation](rounds/2026-09-23-app-pr17-exact-head-remediation.md)
 
 ## Current boundary
 
-- Integration branch: `codex/sdk-scan-token-consumption-20260923`
+- Integration branch: `codex/sdk-pr25-session-authority-20260923`
 - GitHub branch protection: absent as of 2026-09-22; PR-only discipline is
   procedural, not enforced by a repository rule
-- Active branch: `codex/sdk-scan-token-consumption-20260923`
-- Start commit: `1b4c614e180a58130c3d1c5967841affe754242d`
-- Implementation commit:
-  `8338e503f3a002cf5e4f99b4265b2ad82b203596`
+- Active branch: `codex/sdk-pr25-session-authority-20260923`
+- Start commit: `f20f4ed552328a64a8a598aaac72befa1d481262`
+- Implementation commit: pending publication
 - PR merge: pending
 - Supplier binaries: absent and prohibited
 - WHOOP application transport: unchanged
@@ -97,6 +97,13 @@ possession proof, firmware flashing, or OTA behavior.
   callbacks produced a different failure category than Kotlin. The active
   round aligns consumed-token behavior and adds a shared post-selection
   callback scenario.
+- SDK PR `#24` merged scan-token consumption parity at `f20f4ed`. Exact
+  application review then found two narrower authority defects: established
+  session failures were generation-bound rather than connection-token-bound,
+  and tokenless live stop could terminate a replacement live lease. The
+  active correction requires the exact connection/live token on both
+  platforms, migrates all call sites, and redacts every Swift persistence
+  handoff value from default rendering and reflection.
 
 ## Current evidence
 
@@ -206,11 +213,22 @@ possession proof, firmware flashing, or OTA behavior.
   - corrected exact-diff re-review found no remaining P0-P2 issue;
   - commit, PR, merge, deterministic export, and application repin remain
     pending.
+- Current established-session authority correction:
+  - Swift package passes 67/67 tests;
+  - Kotlin/JVM tests and `installDist` pass;
+  - shared conformance passes 44/44 ordered scenarios;
+  - repository policy passes 61 files;
+  - JSON parsing, bounded secret-pattern review, and diff hygiene pass;
+  - the first conformance invocation detected stale pre-change executables;
+    both binaries were rebuilt and the required rerun passed all 44 scenarios;
+  - independent exact-diff review, commit, PR, merge, deterministic exports,
+    and application repin remain pending.
 
 ## Next ordered actions
 
-1. Commit and push once, then merge the SDK correction normally. Do not claim
-   hosted checks: this repository intentionally has no hosted workflow.
+1. Complete independent exact-diff review, then commit and push once and merge
+   the SDK correction normally. Do not claim hosted checks: this repository
+   intentionally has no hosted workflow.
 2. Produce two byte-identical clean source exports from the exact merge.
 3. Repin NOOP application PR `#17`, compile exported support as a separate
    test target, rerun local artifact/app gates, push once, and require final
