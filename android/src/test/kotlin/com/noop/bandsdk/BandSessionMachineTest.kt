@@ -4,6 +4,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -1591,6 +1592,487 @@ class BandSessionMachineTest {
             session.beginLive()
             assertEquals(BandSessionState.LIVE_COLLECTING, session.snapshot().state)
         }
+    }
+
+    @Test
+    fun equivalentCapabilityReportOrderIsIdempotent() {
+        val base = VirtualBandFixtures.capabilities
+        assertTrue(base.streamSemantics.size > 1)
+        val reordered = base.copy(
+            streamSemantics = base.streamSemantics.reversed(),
+        )
+        assertEquals(base, reordered)
+        assertEquals(base.hashCode(), reordered.hashCode())
+        val changed = base.copy(
+            streamSemantics = listOf(
+                base.streamSemantics.first().copy(
+                    parserRevision = "parser-v2",
+                ),
+            ) + base.streamSemantics.drop(1),
+        )
+        assertFalse(base == changed)
+        val composed = "\u00E9"
+        val decomposed = "e\u0301"
+        val composedRevision = base.copy(reportRevision = composed)
+        val decomposedRevision = base.copy(reportRevision = decomposed)
+        composedRevision.validate()
+        decomposedRevision.validate()
+        assertFalse(composedRevision == decomposedRevision)
+
+        val original = base.streamSemantics.first()
+        val composedSemanticReport = base.copy(
+            streamSemantics = listOf(
+                original.copy(parserRevision = composed),
+            ) + base.streamSemantics.drop(1),
+        )
+        val decomposedSemanticReport = base.copy(
+            streamSemantics = listOf(
+                original.copy(parserRevision = decomposed),
+            ) + base.streamSemantics.drop(1),
+        )
+        composedSemanticReport.validate()
+        decomposedSemanticReport.validate()
+        assertFalse(composedSemanticReport == decomposedSemanticReport)
+
+        val second = base.streamSemantics[1]
+        val duplicateFirst = base.copy(
+            streamSemantics = listOf(original, original, second),
+        )
+        val duplicateSecond = base.copy(
+            streamSemantics = listOf(original, second, second),
+        )
+        assertFalse(duplicateFirst == duplicateSecond)
+
+        val recorder = BandDiagnosticsRecorder()
+        val (session, generation, connectionToken) =
+            readySessionWithToken(recorder)
+        session.acceptCapabilities(
+            reordered,
+            connectionToken,
+            generation,
+        )
+
+        assertEquals(BandSessionState.READY, session.snapshot().state)
+        assertEquals(
+            BandDiagnosticEvent(
+                BandDiagnosticKind.CAPABILITY,
+                BandDiagnosticOutcome.STALE,
+            ),
+            recorder.snapshot().last(),
+        )
+    }
+
+    @Test
+    fun capabilityIdentityRevisionsUseExactUtf8() {
+        val composed = "\u00E9"
+        val decomposed = "e\u0301"
+        val baseIdentity = VirtualBandFixtures.identity
+        val identity = BandIdentity(
+            sourceIdentity = baseIdentity.sourceIdentity,
+            hardwareRevision = composed,
+            firmwareVersion = composed,
+            protocolVersion = baseIdentity.protocolVersion,
+            wrapperRevision = baseIdentity.wrapperRevision,
+        )
+        val canonicallyEquivalentIdentity = BandIdentity(
+            sourceIdentity = baseIdentity.sourceIdentity,
+            hardwareRevision = decomposed,
+            firmwareVersion = decomposed,
+            protocolVersion = baseIdentity.protocolVersion,
+            wrapperRevision = baseIdentity.wrapperRevision,
+        )
+        assertNotEquals(identity, canonicallyEquivalentIdentity)
+        val base = VirtualBandFixtures.capabilities
+        val mismatches = listOf(
+            decomposed to composed,
+            composed to decomposed,
+        )
+
+        mismatches.forEach { (hardware, firmware) ->
+            val session = BandSessionMachine()
+            val scanToken = session.beginScan()
+            val generation = scanToken.generation
+            val connectionToken = session.selectCandidate(
+                VirtualBandFixtures.candidate,
+                scanToken,
+            )
+            session.beginConnection(connectionToken, generation)
+            session.beginAuthentication(connectionToken, generation)
+            session.completeConnection(
+                identity,
+                connectionToken,
+                generation,
+            )
+            val report = base.copy(
+                hardwareRevision = hardware,
+                firmwareVersion = firmware,
+            )
+
+            val failure = assertFailsWith<BandException> {
+                session.acceptCapabilities(
+                    report,
+                    connectionToken,
+                    generation,
+                )
+            }
+            assertEquals(
+                BandFailureCategory.INCOMPATIBLE,
+                failure.category,
+            )
+            assertEquals(
+                BandSessionState.INCOMPATIBLE,
+                session.snapshot().state,
+            )
+        }
+    }
+
+    @Test
+    fun oversizedLateCapabilityReportIsBounded() {
+        val base = VirtualBandFixtures.capabilities
+        val oversized = base.copy(
+            streamSemantics = List(
+                BandCapabilityReport.MAXIMUM_STREAM_SEMANTICS + 1,
+            ) {
+                base.streamSemantics.first()
+            },
+        )
+        assertNotEquals(base, oversized)
+        assertEquals(oversized, oversized.copy())
+        val longRevision = base.copy(
+            streamSemantics = listOf(
+                base.streamSemantics.first().copy(
+                    parserRevision = "x".repeat(1_000_000),
+                ),
+            ) + base.streamSemantics.drop(1),
+        )
+        val misreported = base.copy(
+            streamSemantics = MisreportedList(
+                List(
+                    BandCapabilityReport.MAXIMUM_STREAM_SEMANTICS + 1,
+                ) {
+                    base.streamSemantics.first()
+                },
+                size = 1,
+            ),
+        )
+
+        val recorder = BandDiagnosticsRecorder()
+        val (session, generation, connectionToken) =
+            readySessionWithToken(recorder)
+        val before = session.snapshot()
+        listOf(oversized, longRevision, misreported).forEach { invalid ->
+            val failure = assertFailsWith<BandException> {
+                session.acceptCapabilities(
+                    invalid,
+                    connectionToken,
+                    generation,
+                )
+            }
+            assertEquals(BandFailureCategory.INVALID_INPUT, failure.category)
+            assertEquals(before, session.snapshot())
+            assertEquals(
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.CAPABILITY,
+                    BandDiagnosticOutcome.REJECTED,
+                    failureCategory = BandFailureCategory.INVALID_INPUT,
+                ),
+                recorder.snapshot().last(),
+            )
+        }
+    }
+
+    @Test
+    fun publicContractStringEqualityUsesExactUtf8() {
+        val composed = "\u00E9"
+        val decomposed = "e\u0301"
+        val source = VirtualBandFixtures.historyChunk
+        val sourceBatch = source.batches.first()
+        val exactBatch = sourceBatch.copy(
+            sourceIdentity = composed,
+            parserRevision = composed,
+            calibrationRevision = composed,
+        )
+        assertNotEquals(
+            exactBatch,
+            exactBatch.copy(sourceIdentity = decomposed),
+        )
+        assertNotEquals(
+            exactBatch,
+            exactBatch.copy(parserRevision = decomposed),
+        )
+        assertNotEquals(
+            exactBatch,
+            exactBatch.copy(calibrationRevision = decomposed),
+        )
+
+        val exactChunk = source.copy(
+            chunkIdentity = composed,
+            previousCursor = composed,
+            nextCursor = composed,
+            acknowledgementToken = composed,
+            batches = listOf(exactBatch),
+        )
+        assertNotEquals(
+            exactChunk,
+            exactChunk.copy(chunkIdentity = decomposed),
+        )
+        assertNotEquals(
+            exactChunk,
+            exactChunk.copy(previousCursor = decomposed),
+        )
+        assertNotEquals(
+            exactChunk,
+            exactChunk.copy(nextCursor = decomposed),
+        )
+        assertNotEquals(
+            exactChunk,
+            exactChunk.copy(acknowledgementToken = decomposed),
+        )
+
+        val sampleIdentities = sourceBatch.samples.map { it.identity }.toSet()
+        val exactCheckpoint = BandHistoryCheckpoint(
+            sourceIdentity = composed,
+            acknowledgedCursor = composed,
+            lastHistoryComplete = true,
+            durableSampleIdentities = sampleIdentities,
+        )
+        assertNotEquals(
+            exactCheckpoint,
+            exactCheckpoint.copy(sourceIdentity = decomposed),
+        )
+        assertNotEquals(
+            exactCheckpoint,
+            exactCheckpoint.copy(acknowledgedCursor = decomposed),
+        )
+
+        val exactSnapshot = BandSessionSnapshot(
+            state = BandSessionState.READY,
+            generation = 1,
+            activeOperation = null,
+            liveActive = false,
+            acknowledgedHistoryCursor = composed,
+            durableSampleCount = 2,
+        )
+        assertNotEquals(
+            exactSnapshot,
+            exactSnapshot.copy(acknowledgedHistoryCursor = decomposed),
+        )
+    }
+
+    @Test
+    fun sourceIdentityAndCheckpointRestoreUseExactUtf8() {
+        val composed = "\u00E9"
+        val decomposed = "e\u0301"
+        val baseIdentity = VirtualBandFixtures.identity
+        val composedIdentity = baseIdentity.copy(sourceIdentity = composed)
+        val (session, generation) = readySessionWithToken(
+            identity = composedIdentity,
+        ).let { (ready, callbackGeneration, _) ->
+            ready to callbackGeneration
+        }
+        val liveToken = session.beginLive()
+        val sourceBatch = VirtualBandFixtures.liveBatch
+        val failure = assertFailsWith<BandException> {
+            session.stageLiveBatch(
+                sourceBatch.copy(sourceIdentity = decomposed),
+                liveToken,
+                generation,
+            )
+        }
+        assertEquals(BandFailureCategory.INVALID_INPUT, failure.category)
+        session.stopLive(liveToken)
+
+        val checkpoint = BandHistoryCheckpoint(
+            sourceIdentity = composed,
+            acknowledgedCursor = "cursor-2",
+            lastHistoryComplete = true,
+            durableSampleIdentities =
+                VirtualBandFixtures.historyChunk.batches
+                    .flatMap { it.samples }
+                    .map { it.identity }
+                    .toSet(),
+        )
+        val restored = BandSessionMachine(
+            restoredHistoryCheckpoint = checkpoint,
+        )
+        val scanToken = restored.beginScan()
+        val restoredGeneration = scanToken.generation
+        val connectionToken = restored.selectCandidate(
+            VirtualBandFixtures.candidate,
+            scanToken,
+        )
+        restored.beginConnection(connectionToken, restoredGeneration)
+        restored.beginAuthentication(connectionToken, restoredGeneration)
+        restored.completeConnection(
+            baseIdentity.copy(sourceIdentity = decomposed),
+            connectionToken,
+            restoredGeneration,
+        )
+        assertNull(restored.snapshot().acknowledgedHistoryCursor)
+        assertEquals(0, restored.snapshot().durableSampleCount)
+    }
+
+    @Test
+    fun historyCursorProgressionUsesExactUtf8() {
+        val composed = "\u00E9"
+        val decomposed = "e\u0301"
+        val base = VirtualBandFixtures.historyChunk
+        val (session, generation) = readySession()
+        val token = session.beginOperation(BandOperationClass.HISTORY)
+        val first = base.copy(
+            chunkIdentity = "chunk-first",
+            previousCursor = null,
+            nextCursor = composed,
+            complete = false,
+            acknowledgementToken = "ack-first",
+        )
+        val firstAcceptance = session.stageHistoryChunk(
+            first,
+            token,
+            generation,
+        )
+        session.acknowledgeHistory(
+            DurableHistoryReceipt(
+                firstAcceptance,
+                historyStateCommitted = true,
+                committedSamples = firstAcceptance.acceptedSamples.size,
+                committed = true,
+            ),
+            token,
+            generation,
+        )
+
+        val failure = assertFailsWith<BandException> {
+            session.stageHistoryChunk(
+                base.copy(
+                    chunkIdentity = "chunk-second",
+                    previousCursor = decomposed,
+                    nextCursor = "cursor-3",
+                    complete = true,
+                    acknowledgementToken = "ack-second",
+                ),
+                token,
+                generation,
+            )
+        }
+        assertEquals(BandFailureCategory.HISTORY_STALLED, failure.category)
+        assertEquals(composed, session.snapshot().acknowledgedHistoryCursor)
+    }
+
+    @Test
+    fun historyReceiptIdentitiesUseExactUtf8() {
+        val composed = "\u00E9"
+        val decomposed = "e\u0301"
+        val base = VirtualBandFixtures.historyChunk
+        val (session, generation) = readySession()
+        val token = session.beginOperation(BandOperationClass.HISTORY)
+        val acceptance = session.stageHistoryChunk(
+            base.copy(
+                chunkIdentity = composed,
+                previousCursor = null,
+                nextCursor = composed,
+                complete = true,
+                acknowledgementToken = composed,
+            ),
+            token,
+            generation,
+        )
+
+        fun receipt(
+            chunkIdentity: String = composed,
+            acknowledgementToken: String = composed,
+            nextCursor: String? = composed,
+        ): DurableHistoryReceipt {
+            val alteredAcceptance = HistoryAcceptance(
+                chunkIdentity = chunkIdentity,
+                acknowledgementToken = acknowledgementToken,
+                nextCursor = nextCursor,
+                complete = acceptance.complete,
+                overflowed = acceptance.overflowed,
+                retainedRange = acceptance.retainedRange,
+                firstLostRange = acceptance.firstLostRange,
+                acceptedSamples = acceptance.acceptedSamples,
+                duplicateSamples = acceptance.duplicateSamples,
+                sessionNonce = acceptance.sessionNonce,
+                receiptSequence = acceptance.receiptSequence,
+            )
+            return DurableHistoryReceipt(
+                alteredAcceptance,
+                historyStateCommitted = true,
+                committedSamples = acceptance.acceptedSamples.size,
+                committed = true,
+            )
+        }
+
+        listOf(
+            receipt(chunkIdentity = decomposed),
+            receipt(acknowledgementToken = decomposed),
+            receipt(nextCursor = decomposed),
+        ).forEach { mismatched ->
+            val failure = assertFailsWith<BandException> {
+                session.acknowledgeHistory(
+                    mismatched,
+                    token,
+                    generation,
+                )
+            }
+            assertEquals(BandFailureCategory.STORAGE, failure.category)
+        }
+        session.acknowledgeHistory(receipt(), token, generation)
+    }
+
+    @Test
+    fun negotiatedRevisionsUseExactUtf8() {
+        val composed = "\u00E9"
+        val decomposed = "e\u0301"
+        val base = VirtualBandFixtures.capabilities
+        val report = base.copy(
+            streamSemantics = base.streamSemantics.map {
+                it.copy(
+                    parserRevision = composed,
+                    calibrationRevision = composed,
+                )
+            },
+        )
+        val (session, generation) =
+            readySessionWithCapabilities(report)
+        val liveToken = session.beginLive()
+        val source = VirtualBandFixtures.liveBatch
+        val mismatches = listOf(
+            BandSampleBatch(
+                sourceIdentity = source.sourceIdentity,
+                lane = source.lane,
+                parserRevision = decomposed,
+                calibrationRevision = composed,
+                samples = source.samples,
+            ),
+            BandSampleBatch(
+                sourceIdentity = source.sourceIdentity,
+                lane = source.lane,
+                parserRevision = composed,
+                calibrationRevision = decomposed,
+                samples = source.samples,
+            ),
+        )
+
+        mismatches.forEach { mismatch ->
+            val failure = assertFailsWith<BandException> {
+                session.stageLiveBatch(
+                    mismatch,
+                    liveToken,
+                    generation,
+                )
+            }
+            assertEquals(
+                BandFailureCategory.UNSUPPORTED,
+                failure.category,
+            )
+            assertEquals(
+                BandSessionState.LIVE_COLLECTING,
+                session.snapshot().state,
+            )
+        }
+        session.stopLive(liveToken)
     }
 
     @Test
@@ -3920,6 +4402,7 @@ class BandSessionMachineTest {
         diagnostics: BandDiagnosticsRecorder = BandDiagnosticsRecorder(),
         capabilities: BandCapabilityReport =
             VirtualBandFixtures.capabilities,
+        identity: BandIdentity = VirtualBandFixtures.identity,
     ): Triple<BandSessionMachine, Long, BandConnectionToken> {
         val session = BandSessionMachine(diagnostics)
         val scanToken = session.beginScan()
@@ -3929,7 +4412,7 @@ class BandSessionMachineTest {
         session.beginConnection(connectionToken, generation)
         session.beginAuthentication(connectionToken, generation)
         session.completeConnection(
-            VirtualBandFixtures.identity,
+            identity,
             connectionToken,
             generation,
         )

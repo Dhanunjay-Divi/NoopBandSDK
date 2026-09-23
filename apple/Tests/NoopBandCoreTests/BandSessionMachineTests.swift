@@ -913,6 +913,707 @@ struct BandSessionMachineTests {
         try await session.stopLive(token: liveToken)
     }
 
+    @Test("Equivalent capability report order is idempotent")
+    func equivalentCapabilityReportOrderIsIdempotent() async throws {
+        let base = VirtualBandFixtures.capabilities
+        #expect(base.streamSemantics.count > 1)
+        let reordered = BandCapabilityReport(
+            schemaVersion: base.schemaVersion,
+            reportRevision: base.reportRevision,
+            protocolVersion: base.protocolVersion,
+            hardwareRevision: base.hardwareRevision,
+            firmwareVersion: base.firmwareVersion,
+            historyDays: base.historyDays,
+            capabilities: base.capabilities,
+            liveStreams: base.liveStreams,
+            historyStreams: base.historyStreams,
+            operationsAllowedDuringLive: base.operationsAllowedDuringLive,
+            streamSemantics: Array(base.streamSemantics.reversed())
+        )
+        #expect(base == reordered)
+        let original = try #require(base.streamSemantics.first)
+        let changedSemantic = BandStreamSemantics(
+            lane: original.lane,
+            stream: original.stream,
+            unit: original.unit,
+            cadence: original.cadence,
+            nominalIntervalMilliseconds:
+                original.nominalIntervalMilliseconds,
+            quality: original.quality,
+            timestamp: original.timestamp,
+            parserRevision: "parser-v2",
+            calibrationRevision: original.calibrationRevision
+        )
+        let changed = BandCapabilityReport(
+            schemaVersion: base.schemaVersion,
+            reportRevision: base.reportRevision,
+            protocolVersion: base.protocolVersion,
+            hardwareRevision: base.hardwareRevision,
+            firmwareVersion: base.firmwareVersion,
+            historyDays: base.historyDays,
+            capabilities: base.capabilities,
+            liveStreams: base.liveStreams,
+            historyStreams: base.historyStreams,
+            operationsAllowedDuringLive: base.operationsAllowedDuringLive,
+            streamSemantics: [changedSemantic]
+                + Array(base.streamSemantics.dropFirst())
+        )
+        #expect(base != changed)
+        let composed = "\u{00E9}"
+        let decomposed = "e\u{0301}"
+        let composedRevision = BandCapabilityReport(
+            schemaVersion: base.schemaVersion,
+            reportRevision: composed,
+            protocolVersion: base.protocolVersion,
+            hardwareRevision: base.hardwareRevision,
+            firmwareVersion: base.firmwareVersion,
+            historyDays: base.historyDays,
+            capabilities: base.capabilities,
+            liveStreams: base.liveStreams,
+            historyStreams: base.historyStreams,
+            operationsAllowedDuringLive: base.operationsAllowedDuringLive,
+            streamSemantics: base.streamSemantics
+        )
+        let decomposedRevision = BandCapabilityReport(
+            schemaVersion: base.schemaVersion,
+            reportRevision: decomposed,
+            protocolVersion: base.protocolVersion,
+            hardwareRevision: base.hardwareRevision,
+            firmwareVersion: base.firmwareVersion,
+            historyDays: base.historyDays,
+            capabilities: base.capabilities,
+            liveStreams: base.liveStreams,
+            historyStreams: base.historyStreams,
+            operationsAllowedDuringLive: base.operationsAllowedDuringLive,
+            streamSemantics: base.streamSemantics
+        )
+        try composedRevision.validate()
+        try decomposedRevision.validate()
+        #expect(composedRevision != decomposedRevision)
+
+        let composedSemantic = BandStreamSemantics(
+            lane: original.lane,
+            stream: original.stream,
+            unit: original.unit,
+            cadence: original.cadence,
+            nominalIntervalMilliseconds:
+                original.nominalIntervalMilliseconds,
+            quality: original.quality,
+            timestamp: original.timestamp,
+            parserRevision: composed,
+            calibrationRevision: original.calibrationRevision
+        )
+        let decomposedSemantic = BandStreamSemantics(
+            lane: original.lane,
+            stream: original.stream,
+            unit: original.unit,
+            cadence: original.cadence,
+            nominalIntervalMilliseconds:
+                original.nominalIntervalMilliseconds,
+            quality: original.quality,
+            timestamp: original.timestamp,
+            parserRevision: decomposed,
+            calibrationRevision: original.calibrationRevision
+        )
+        let composedSemanticReport = BandCapabilityReport(
+            schemaVersion: base.schemaVersion,
+            reportRevision: base.reportRevision,
+            protocolVersion: base.protocolVersion,
+            hardwareRevision: base.hardwareRevision,
+            firmwareVersion: base.firmwareVersion,
+            historyDays: base.historyDays,
+            capabilities: base.capabilities,
+            liveStreams: base.liveStreams,
+            historyStreams: base.historyStreams,
+            operationsAllowedDuringLive: base.operationsAllowedDuringLive,
+            streamSemantics: [composedSemantic]
+                + Array(base.streamSemantics.dropFirst())
+        )
+        let decomposedSemanticReport = BandCapabilityReport(
+            schemaVersion: base.schemaVersion,
+            reportRevision: base.reportRevision,
+            protocolVersion: base.protocolVersion,
+            hardwareRevision: base.hardwareRevision,
+            firmwareVersion: base.firmwareVersion,
+            historyDays: base.historyDays,
+            capabilities: base.capabilities,
+            liveStreams: base.liveStreams,
+            historyStreams: base.historyStreams,
+            operationsAllowedDuringLive: base.operationsAllowedDuringLive,
+            streamSemantics: [decomposedSemantic]
+                + Array(base.streamSemantics.dropFirst())
+        )
+        try composedSemanticReport.validate()
+        try decomposedSemanticReport.validate()
+        #expect(composedSemanticReport != decomposedSemanticReport)
+
+        let second = try #require(base.streamSemantics.dropFirst().first)
+        let duplicateFirst = BandCapabilityReport(
+            schemaVersion: base.schemaVersion,
+            reportRevision: base.reportRevision,
+            protocolVersion: base.protocolVersion,
+            hardwareRevision: base.hardwareRevision,
+            firmwareVersion: base.firmwareVersion,
+            historyDays: base.historyDays,
+            capabilities: base.capabilities,
+            liveStreams: base.liveStreams,
+            historyStreams: base.historyStreams,
+            operationsAllowedDuringLive: base.operationsAllowedDuringLive,
+            streamSemantics: [original, original, second]
+        )
+        let duplicateSecond = BandCapabilityReport(
+            schemaVersion: base.schemaVersion,
+            reportRevision: base.reportRevision,
+            protocolVersion: base.protocolVersion,
+            hardwareRevision: base.hardwareRevision,
+            firmwareVersion: base.firmwareVersion,
+            historyDays: base.historyDays,
+            capabilities: base.capabilities,
+            liveStreams: base.liveStreams,
+            historyStreams: base.historyStreams,
+            operationsAllowedDuringLive: base.operationsAllowedDuringLive,
+            streamSemantics: [original, second, second]
+        )
+        #expect(duplicateFirst != duplicateSecond)
+
+        let recorder = BandDiagnosticsRecorder()
+        let (session, generation, connectionToken) =
+            try await readySessionWithToken(diagnostics: recorder)
+        try await session.acceptCapabilities(
+            reordered,
+            token: connectionToken,
+            callbackGeneration: generation
+        )
+
+        #expect(await session.snapshot().state == .ready)
+        #expect(
+            await recorder.snapshot().last
+                == BandDiagnosticEvent(
+                    kind: .capability,
+                    outcome: .stale
+                )
+        )
+    }
+
+    @Test("Capability identity revisions use exact UTF-8")
+    func capabilityIdentityRevisionsUseExactUTF8() async throws {
+        let composed = "\u{00E9}"
+        let decomposed = "e\u{0301}"
+        let baseIdentity = VirtualBandFixtures.identity
+        let identity = BandIdentity(
+            sourceIdentity: baseIdentity.sourceIdentity,
+            hardwareRevision: composed,
+            firmwareVersion: composed,
+            protocolVersion: baseIdentity.protocolVersion,
+            wrapperRevision: baseIdentity.wrapperRevision
+        )
+        let canonicallyEquivalentIdentity = BandIdentity(
+            sourceIdentity: baseIdentity.sourceIdentity,
+            hardwareRevision: decomposed,
+            firmwareVersion: decomposed,
+            protocolVersion: baseIdentity.protocolVersion,
+            wrapperRevision: baseIdentity.wrapperRevision
+        )
+        #expect(identity != canonicallyEquivalentIdentity)
+        let base = VirtualBandFixtures.capabilities
+        let mismatches = [
+            (hardware: decomposed, firmware: composed),
+            (hardware: composed, firmware: decomposed),
+        ]
+
+        for mismatch in mismatches {
+            let session = BandSessionMachine()
+            let scanToken = try await session.beginScan()
+            let generation = scanToken.generation
+            let connectionToken = try await session.selectCandidate(
+                VirtualBandFixtures.candidate,
+                callbackGeneration: scanToken
+            )
+            try await session.beginConnection(
+                token: connectionToken,
+                callbackGeneration: generation
+            )
+            try await session.beginAuthentication(
+                token: connectionToken,
+                callbackGeneration: generation
+            )
+            try await session.completeConnection(
+                identity,
+                token: connectionToken,
+                callbackGeneration: generation
+            )
+            let report = BandCapabilityReport(
+                schemaVersion: base.schemaVersion,
+                reportRevision: base.reportRevision,
+                protocolVersion: base.protocolVersion,
+                hardwareRevision: mismatch.hardware,
+                firmwareVersion: mismatch.firmware,
+                historyDays: base.historyDays,
+                capabilities: base.capabilities,
+                liveStreams: base.liveStreams,
+                historyStreams: base.historyStreams,
+                operationsAllowedDuringLive:
+                    base.operationsAllowedDuringLive,
+                streamSemantics: base.streamSemantics
+            )
+
+            await #expect(throws: BandFailureCategory.incompatible) {
+                try await session.acceptCapabilities(
+                    report,
+                    token: connectionToken,
+                    callbackGeneration: generation
+                )
+            }
+            #expect(await session.snapshot().state == .incompatible)
+        }
+    }
+
+    @Test("Oversized late capability reports are bounded before equality")
+    func oversizedLateCapabilityReportIsBounded() async throws {
+        let base = VirtualBandFixtures.capabilities
+        let semantic = try #require(base.streamSemantics.first)
+        let oversized = BandCapabilityReport(
+            schemaVersion: base.schemaVersion,
+            reportRevision: base.reportRevision,
+            protocolVersion: base.protocolVersion,
+            hardwareRevision: base.hardwareRevision,
+            firmwareVersion: base.firmwareVersion,
+            historyDays: base.historyDays,
+            capabilities: base.capabilities,
+            liveStreams: base.liveStreams,
+            historyStreams: base.historyStreams,
+            operationsAllowedDuringLive:
+                base.operationsAllowedDuringLive,
+            streamSemantics: Array(
+                repeating: semantic,
+                count: BandCapabilityReport.maximumStreamSemantics + 1
+            )
+        )
+        #expect(base != oversized)
+        let oversizedCopy = oversized
+        #expect(oversized == oversizedCopy)
+        let original = try #require(base.streamSemantics.first)
+        let longSemantic = BandStreamSemantics(
+            lane: original.lane,
+            stream: original.stream,
+            unit: original.unit,
+            cadence: original.cadence,
+            nominalIntervalMilliseconds:
+                original.nominalIntervalMilliseconds,
+            quality: original.quality,
+            timestamp: original.timestamp,
+            parserRevision: String(repeating: "x", count: 1_000_000),
+            calibrationRevision: original.calibrationRevision
+        )
+        let longRevision = BandCapabilityReport(
+            schemaVersion: base.schemaVersion,
+            reportRevision: base.reportRevision,
+            protocolVersion: base.protocolVersion,
+            hardwareRevision: base.hardwareRevision,
+            firmwareVersion: base.firmwareVersion,
+            historyDays: base.historyDays,
+            capabilities: base.capabilities,
+            liveStreams: base.liveStreams,
+            historyStreams: base.historyStreams,
+            operationsAllowedDuringLive:
+                base.operationsAllowedDuringLive,
+            streamSemantics: [longSemantic]
+                + Array(base.streamSemantics.dropFirst())
+        )
+
+        let recorder = BandDiagnosticsRecorder()
+        let (session, generation, connectionToken) =
+            try await readySessionWithToken(diagnostics: recorder)
+        let before = await session.snapshot()
+
+        for invalid in [oversized, longRevision] {
+            await #expect(throws: BandFailureCategory.invalidInput) {
+                try await session.acceptCapabilities(
+                    invalid,
+                    token: connectionToken,
+                    callbackGeneration: generation
+                )
+            }
+            #expect(await session.snapshot() == before)
+            #expect(
+                await recorder.snapshot().last
+                    == BandDiagnosticEvent(
+                        kind: .capability,
+                        outcome: .rejected,
+                        failureCategory: .invalidInput
+                    )
+            )
+        }
+    }
+
+    @Test("Public contract string equality uses exact UTF-8")
+    func publicContractStringEqualityUsesExactUTF8() throws {
+        let composed = "\u{00E9}"
+        let decomposed = "e\u{0301}"
+        let source = VirtualBandFixtures.historyChunk
+        let sourceBatch = try #require(source.batches.first)
+
+        func batch(
+            sourceIdentity: String = composed,
+            parserRevision: String = composed,
+            calibrationRevision: String = composed
+        ) -> BandSampleBatch {
+            BandSampleBatch(
+                sourceIdentity: sourceIdentity,
+                lane: sourceBatch.lane,
+                parserRevision: parserRevision,
+                calibrationRevision: calibrationRevision,
+                samples: sourceBatch.samples
+            )
+        }
+        let exactBatch = batch()
+        #expect(exactBatch != batch(sourceIdentity: decomposed))
+        #expect(exactBatch != batch(parserRevision: decomposed))
+        #expect(exactBatch != batch(calibrationRevision: decomposed))
+
+        func chunk(
+            chunkIdentity: String = composed,
+            previousCursor: String? = composed,
+            nextCursor: String? = composed,
+            acknowledgementToken: String = composed
+        ) -> BandHistoryChunk {
+            BandHistoryChunk(
+                chunkIdentity: chunkIdentity,
+                previousCursor: previousCursor,
+                nextCursor: nextCursor,
+                complete: source.complete,
+                overflowed: source.overflowed,
+                retainedRange: source.retainedRange,
+                firstLostRange: source.firstLostRange,
+                acknowledgementToken: acknowledgementToken,
+                batches: [exactBatch]
+            )
+        }
+        let exactChunk = chunk()
+        #expect(exactChunk != chunk(chunkIdentity: decomposed))
+        #expect(exactChunk != chunk(previousCursor: decomposed))
+        #expect(exactChunk != chunk(nextCursor: decomposed))
+        #expect(exactChunk != chunk(acknowledgementToken: decomposed))
+
+        let sampleIdentities = Set(sourceBatch.samples.map(\.identity))
+        let exactCheckpoint = BandHistoryCheckpoint(
+            sourceIdentity: composed,
+            acknowledgedCursor: composed,
+            lastHistoryComplete: true,
+            durableSampleIdentities: sampleIdentities
+        )
+        #expect(
+            exactCheckpoint
+                != BandHistoryCheckpoint(
+                    sourceIdentity: decomposed,
+                    acknowledgedCursor: composed,
+                    lastHistoryComplete: true,
+                    durableSampleIdentities: sampleIdentities
+                )
+        )
+        #expect(
+            exactCheckpoint
+                != BandHistoryCheckpoint(
+                    sourceIdentity: composed,
+                    acknowledgedCursor: decomposed,
+                    lastHistoryComplete: true,
+                    durableSampleIdentities: sampleIdentities
+                )
+        )
+
+        let exactSnapshot = BandSessionSnapshot(
+            state: .ready,
+            generation: 1,
+            activeOperation: nil,
+            liveActive: false,
+            acknowledgedHistoryCursor: composed,
+            durableSampleCount: 2
+        )
+        #expect(
+            exactSnapshot
+                != BandSessionSnapshot(
+                    state: .ready,
+                    generation: 1,
+                    activeOperation: nil,
+                    liveActive: false,
+                    acknowledgedHistoryCursor: decomposed,
+                    durableSampleCount: 2
+                )
+        )
+    }
+
+    @Test("Source identity and checkpoint restore use exact UTF-8")
+    func sourceIdentityAndCheckpointRestoreUseExactUTF8() async throws {
+        let composed = "\u{00E9}"
+        let decomposed = "e\u{0301}"
+        let baseIdentity = VirtualBandFixtures.identity
+        let composedIdentity = BandIdentity(
+            sourceIdentity: composed,
+            hardwareRevision: baseIdentity.hardwareRevision,
+            firmwareVersion: baseIdentity.firmwareVersion,
+            protocolVersion: baseIdentity.protocolVersion,
+            wrapperRevision: baseIdentity.wrapperRevision
+        )
+        let (session, generation, _) = try await readySessionWithToken(
+            identity: composedIdentity
+        )
+        let liveToken = try await session.beginLive()
+        let sourceBatch = VirtualBandFixtures.liveBatch
+        let mismatchedBatch = BandSampleBatch(
+            sourceIdentity: decomposed,
+            lane: sourceBatch.lane,
+            parserRevision: sourceBatch.parserRevision,
+            calibrationRevision: sourceBatch.calibrationRevision,
+            samples: sourceBatch.samples
+        )
+        await #expect(throws: BandFailureCategory.invalidInput) {
+            _ = try await session.stageLiveBatch(
+                mismatchedBatch,
+                token: liveToken,
+                callbackGeneration: generation
+            )
+        }
+        try await session.stopLive(token: liveToken)
+
+        let checkpoint = BandHistoryCheckpoint(
+            sourceIdentity: composed,
+            acknowledgedCursor: "cursor-2",
+            lastHistoryComplete: true,
+            durableSampleIdentities: Set(
+                VirtualBandFixtures.historyChunk.batches
+                    .flatMap(\.samples)
+                    .map(\.identity)
+            )
+        )
+        let restored = BandSessionMachine(historyCheckpoint: checkpoint)
+        let scanToken = try await restored.beginScan()
+        let restoredGeneration = scanToken.generation
+        let connectionToken = try await restored.selectCandidate(
+            VirtualBandFixtures.candidate,
+            callbackGeneration: scanToken
+        )
+        try await restored.beginConnection(
+            token: connectionToken,
+            callbackGeneration: restoredGeneration
+        )
+        try await restored.beginAuthentication(
+            token: connectionToken,
+            callbackGeneration: restoredGeneration
+        )
+        let decomposedIdentity = BandIdentity(
+            sourceIdentity: decomposed,
+            hardwareRevision: baseIdentity.hardwareRevision,
+            firmwareVersion: baseIdentity.firmwareVersion,
+            protocolVersion: baseIdentity.protocolVersion,
+            wrapperRevision: baseIdentity.wrapperRevision
+        )
+        try await restored.completeConnection(
+            decomposedIdentity,
+            token: connectionToken,
+            callbackGeneration: restoredGeneration
+        )
+        let snapshot = await restored.snapshot()
+        #expect(snapshot.acknowledgedHistoryCursor == nil)
+        #expect(snapshot.durableSampleCount == 0)
+    }
+
+    @Test("History cursor progression uses exact UTF-8")
+    func historyCursorProgressionUsesExactUTF8() async throws {
+        let composed = "\u{00E9}"
+        let decomposed = "e\u{0301}"
+        let base = VirtualBandFixtures.historyChunk
+        let (session, generation) = try await readySession()
+        let token = try await session.beginOperation(.history)
+        let first = BandHistoryChunk(
+            chunkIdentity: "chunk-first",
+            previousCursor: nil,
+            nextCursor: composed,
+            complete: false,
+            overflowed: base.overflowed,
+            retainedRange: base.retainedRange,
+            firstLostRange: base.firstLostRange,
+            acknowledgementToken: "ack-first",
+            batches: base.batches
+        )
+        let firstAcceptance = try await session.stageHistoryChunk(
+            first,
+            token: token,
+            callbackGeneration: generation
+        )
+        try await session.acknowledgeHistory(
+            receipt: DurableHistoryReceipt(
+                acceptance: firstAcceptance,
+                historyStateCommitted: true,
+                committedSamples: firstAcceptance.acceptedSamples.count,
+                committed: true
+            ),
+            token: token,
+            callbackGeneration: generation
+        )
+
+        let mismatched = BandHistoryChunk(
+            chunkIdentity: "chunk-second",
+            previousCursor: decomposed,
+            nextCursor: "cursor-3",
+            complete: true,
+            overflowed: base.overflowed,
+            retainedRange: base.retainedRange,
+            firstLostRange: base.firstLostRange,
+            acknowledgementToken: "ack-second",
+            batches: base.batches
+        )
+        await #expect(throws: BandFailureCategory.historyStalled) {
+            _ = try await session.stageHistoryChunk(
+                mismatched,
+                token: token,
+                callbackGeneration: generation
+            )
+        }
+        #expect(
+            optionalStringsHaveIdenticalUTF8(
+                await session.snapshot().acknowledgedHistoryCursor,
+                composed
+            )
+        )
+    }
+
+    @Test("History receipt identities use exact UTF-8")
+    func historyReceiptIdentitiesUseExactUTF8() async throws {
+        let composed = "\u{00E9}"
+        let decomposed = "e\u{0301}"
+        let base = VirtualBandFixtures.historyChunk
+        let (session, generation) = try await readySession()
+        let token = try await session.beginOperation(.history)
+        let chunk = BandHistoryChunk(
+            chunkIdentity: composed,
+            previousCursor: nil,
+            nextCursor: composed,
+            complete: true,
+            overflowed: base.overflowed,
+            retainedRange: base.retainedRange,
+            firstLostRange: base.firstLostRange,
+            acknowledgementToken: composed,
+            batches: base.batches
+        )
+        let acceptance = try await session.stageHistoryChunk(
+            chunk,
+            token: token,
+            callbackGeneration: generation
+        )
+
+        func receipt(
+            chunkIdentity: String = composed,
+            acknowledgementToken: String = composed,
+            nextCursor: String? = composed
+        ) -> DurableHistoryReceipt {
+            let alteredAcceptance = HistoryAcceptance(
+                chunkIdentity: chunkIdentity,
+                acknowledgementToken: acknowledgementToken,
+                nextCursor: nextCursor,
+                complete: acceptance.complete,
+                overflowed: acceptance.overflowed,
+                retainedRange: acceptance.retainedRange,
+                firstLostRange: acceptance.firstLostRange,
+                acceptedSamples: acceptance.acceptedSamples,
+                duplicateSamples: acceptance.duplicateSamples,
+                sessionNonce: acceptance.sessionNonce,
+                receiptSequence: acceptance.receiptSequence
+            )
+            return DurableHistoryReceipt(
+                acceptance: alteredAcceptance,
+                historyStateCommitted: true,
+                committedSamples: acceptance.acceptedSamples.count,
+                committed: true
+            )
+        }
+
+        for mismatched in [
+            receipt(chunkIdentity: decomposed),
+            receipt(acknowledgementToken: decomposed),
+            receipt(nextCursor: decomposed),
+        ] {
+            await #expect(throws: BandFailureCategory.storage) {
+                try await session.acknowledgeHistory(
+                    receipt: mismatched,
+                    token: token,
+                    callbackGeneration: generation
+                )
+            }
+        }
+        try await session.acknowledgeHistory(
+            receipt: receipt(),
+            token: token,
+            callbackGeneration: generation
+        )
+    }
+
+    @Test("Negotiated revisions use exact UTF-8")
+    func negotiatedRevisionsUseExactUTF8() async throws {
+        let composed = "\u{00E9}"
+        let decomposed = "e\u{0301}"
+        let base = VirtualBandFixtures.capabilities
+        let semantics = base.streamSemantics.map {
+            BandStreamSemantics(
+                lane: $0.lane,
+                stream: $0.stream,
+                unit: $0.unit,
+                cadence: $0.cadence,
+                nominalIntervalMilliseconds:
+                    $0.nominalIntervalMilliseconds,
+                quality: $0.quality,
+                timestamp: $0.timestamp,
+                parserRevision: composed,
+                calibrationRevision: composed
+            )
+        }
+        let report = BandCapabilityReport(
+            schemaVersion: base.schemaVersion,
+            reportRevision: base.reportRevision,
+            protocolVersion: base.protocolVersion,
+            hardwareRevision: base.hardwareRevision,
+            firmwareVersion: base.firmwareVersion,
+            historyDays: base.historyDays,
+            capabilities: base.capabilities,
+            liveStreams: base.liveStreams,
+            historyStreams: base.historyStreams,
+            operationsAllowedDuringLive: base.operationsAllowedDuringLive,
+            streamSemantics: semantics
+        )
+        let (session, generation) = try await readySession(
+            capabilities: report
+        )
+        let liveToken = try await session.beginLive()
+        let source = VirtualBandFixtures.liveBatch
+        let mismatches = [
+            BandSampleBatch(
+                sourceIdentity: source.sourceIdentity,
+                lane: source.lane,
+                parserRevision: decomposed,
+                calibrationRevision: composed,
+                samples: source.samples
+            ),
+            BandSampleBatch(
+                sourceIdentity: source.sourceIdentity,
+                lane: source.lane,
+                parserRevision: composed,
+                calibrationRevision: decomposed,
+                samples: source.samples
+            ),
+        ]
+
+        for mismatch in mismatches {
+            await #expect(throws: BandFailureCategory.unsupported) {
+                _ = try await session.stageLiveBatch(
+                    mismatch,
+                    token: liveToken,
+                    callbackGeneration: generation
+                )
+            }
+            #expect(await session.snapshot().state == .liveCollecting)
+        }
+        try await session.stopLive(token: liveToken)
+    }
+
     @Test("Negotiated stream semantics reject revision drift before staging")
     func negotiatedStreamSemanticsRejectRevisionDriftBeforeStaging()
         async throws
@@ -3333,7 +4034,8 @@ struct BandSessionMachineTests {
     private func readySessionWithToken(
         capabilities: BandCapabilityReport =
             VirtualBandFixtures.capabilities,
-        diagnostics: BandDiagnosticsRecorder = BandDiagnosticsRecorder()
+        diagnostics: BandDiagnosticsRecorder = BandDiagnosticsRecorder(),
+        identity: BandIdentity = VirtualBandFixtures.identity
     ) async throws -> (
         BandSessionMachine,
         UInt64,
@@ -3355,7 +4057,7 @@ struct BandSessionMachineTests {
             callbackGeneration: generation
         )
         try await session.completeConnection(
-            VirtualBandFixtures.identity,
+            identity,
             token: connectionToken,
             callbackGeneration: generation
         )
