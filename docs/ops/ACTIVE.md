@@ -4,17 +4,19 @@ Last updated: **2026-09-23**
 
 ## Current round
 
+- [Scan-token consumption parity](rounds/2026-09-23-scan-token-consumption-parity.md)
 - [Kotlin scan-token identity](rounds/2026-09-23-kotlin-scan-token-identity.md)
 - [Application PR 17 exact-head remediation](rounds/2026-09-23-app-pr17-exact-head-remediation.md)
 
 ## Current boundary
 
-- Integration branch: `codex/sdk-pr23-scan-token-identity-20260923`
+- Integration branch: `codex/sdk-scan-token-consumption-20260923`
 - GitHub branch protection: absent as of 2026-09-22; PR-only discipline is
   procedural, not enforced by a repository rule
-- Active branch: `codex/sdk-pr23-scan-token-identity-20260923`
-- Start commit: `1883ad33e840b1aa8b257f4f601f299f883678ca`
-- Implementation commit: pending
+- Active branch: `codex/sdk-scan-token-consumption-20260923`
+- Start commit: `1b4c614e180a58130c3d1c5967841affe754242d`
+- Implementation commit:
+  `8338e503f3a002cf5e4f99b4265b2ad82b203596`
 - PR merge: pending
 - Supplier binaries: absent and prohibited
 - WHOOP application transport: unchanged
@@ -89,6 +91,12 @@ possession proof, firmware flashing, or OTA behavior.
   replacement session objects, and history can start without any negotiated
   history stream. The active round corrects those contracts before the
   application artifact is repinned.
+- SDK PR `#23` merged the exact Kotlin scan-token identity correction at
+  `1b4c614e`. Independent review of the repinned application then found that
+  Apple did not consume its value token after selection, so late discovery
+  callbacks produced a different failure category than Kotlin. The active
+  round aligns consumed-token behavior and adds a shared post-selection
+  callback scenario.
 
 ## Current evidence
 
@@ -184,6 +192,20 @@ possession proof, firmware flashing, or OTA behavior.
   - Shared conformance: 41/41 matched.
   - Repository gate: 59 files passed.
   - Diff hygiene: passed.
+- Current scan-token consumption parity:
+  - focused Swift and Kotlin regressions pass;
+  - complete Swift passes 64/64;
+  - complete Kotlin/JVM passes 71/71 and `installDist` builds;
+  - shared conformance passes 42/42 ordered results;
+  - the repository gate passes 60 files and diff hygiene is clean;
+  - initial exact-diff review found one P2 suspension-boundary evidence gap;
+    the direct Swift regression now pauses candidate selection at its
+    diagnostic suspension, proves late select/cancel/failure callbacks are
+    stale before the original call returns, and proves the valid connection
+    token remains usable;
+  - corrected exact-diff re-review found no remaining P0-P2 issue;
+  - commit, PR, merge, deterministic export, and application repin remain
+    pending.
 
 ## Next ordered actions
 
