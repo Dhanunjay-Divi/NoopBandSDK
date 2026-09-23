@@ -76,7 +76,7 @@ public actor BandSessionMachine {
     }
 
     @discardableResult
-    public func beginScan() async throws -> UInt64 {
+    public func beginScan() async throws -> BandScanToken {
         try ensureNotClosed()
         guard !hasPendingPersistence else {
             await diagnostics.record(
@@ -117,15 +117,18 @@ public actor BandSessionMachine {
             )
             throw BandFailureCategory.staleCallback
         }
-        return scanGeneration
+        return BandScanToken(
+            sessionNonce: sessionNonce,
+            generation: scanGeneration
+        )
     }
 
     public func selectCandidate(
         _ candidate: BandPairingCandidate,
-        callbackGeneration: UInt64
+        callbackGeneration: BandScanToken
     ) async throws -> BandConnectionToken {
         try ensureNotClosed()
-        try await validateCallbackGeneration(
+        try await validateScanToken(
             callbackGeneration,
             diagnosticKind: .discovery
         )
@@ -179,9 +182,9 @@ public actor BandSessionMachine {
         return token
     }
 
-    public func cancelScan(callbackGeneration: UInt64) async throws {
+    public func cancelScan(callbackGeneration: BandScanToken) async throws {
         try ensureNotClosed()
-        try await validateCallbackGeneration(
+        try await validateScanToken(
             callbackGeneration,
             diagnosticKind: .discovery
         )
@@ -205,10 +208,10 @@ public actor BandSessionMachine {
 
     public func failScan(
         _ category: BandFailureCategory,
-        callbackGeneration: UInt64
+        callbackGeneration: BandScanToken
     ) async throws {
         try ensureNotClosed()
-        try await validateCallbackGeneration(
+        try await validateScanToken(
             callbackGeneration,
             diagnosticKind: .discovery
         )
@@ -1058,6 +1061,7 @@ public actor BandSessionMachine {
             }
         } else if operationClass == .history,
                   (capabilityReport?.historyDays ?? 0) <= 0
+                    || (capabilityReport?.historyStreams.isEmpty ?? true)
         {
             await diagnostics.record(
                 BandDiagnosticEvent(
@@ -1753,6 +1757,24 @@ public actor BandSessionMachine {
         diagnosticKind: BandDiagnosticKind
     ) async throws {
         guard callbackGeneration == generation else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: diagnosticKind,
+                    outcome: .stale,
+                    failureCategory: .staleCallback
+                )
+            )
+            throw BandFailureCategory.staleCallback
+        }
+    }
+
+    private func validateScanToken(
+        _ token: BandScanToken,
+        diagnosticKind: BandDiagnosticKind
+    ) async throws {
+        guard token.sessionNonce == sessionNonce,
+              token.generation == generation
+        else {
             await diagnostics.record(
                 BandDiagnosticEvent(
                     kind: diagnosticKind,

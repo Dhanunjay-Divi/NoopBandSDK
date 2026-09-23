@@ -74,14 +74,15 @@ storage remains authoritative for idempotency outside that recent window.
 
 ## Callback and input domains
 
-Every asynchronous supplier callback carries the session generation captured
-when its request was issued. Connection and authentication terminal callbacks
-also carry their originating bounded lifecycle phase. Discovery selection and
-terminals, connection/authentication progress and terminals, capability
-negotiation, live and history delivery, durable receipts, and reconnect
-callbacks from older generations fail closed without mutating the current
-session. Diagnostics use the originating phase rather than inferring it from a
-replacement session.
+Discovery selection and terminal callbacks carry an opaque token bound to both
+the exact session object and the generation captured when scanning began.
+Later asynchronous supplier callbacks carry the session generation plus their
+session-bound connection, live, operation, or receipt credential. Connection
+and authentication terminal callbacks also carry their originating bounded
+lifecycle phase. Foreign-session or older-generation discovery,
+connection/authentication, capability, live, history, receipt, and reconnect
+callbacks fail closed without mutating the current session. Diagnostics use the
+originating phase rather than inferring it from a replacement session.
 
 All bounded protocol strings use UTF-8 byte length on Apple and Android.
 Sample sequence values use `0 ... Int64.max`, and device time is a non-negative

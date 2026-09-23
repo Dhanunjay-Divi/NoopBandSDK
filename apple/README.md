@@ -12,8 +12,9 @@ Implemented neutral-core gates:
 - one actor-owned session and command queue;
 - cancellation and stale-callback rejection;
 - capability revision validation and fail-closed incompatibility;
-- generation-fenced discovery, connection/authentication, capability, data,
-  receipt, and reconnect callbacks;
+- session-token-bound discovery plus generation- and credential-fenced
+  connection/authentication, capability, data, receipt, and reconnect
+  callbacks;
 - live/history separation and deterministic deduplication;
 - durable app-store receipt before historical checkpoint advance;
 - explicit operation cancellation and categorized failure terminals;
