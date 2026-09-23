@@ -20,10 +20,10 @@ Last updated: **2026-09-23**
 - Start commit: `650c89e45ca2ab28e14e76e447a7026479e42b4e`
 - Reviewed implementation commit:
   `3831fb63ae336bd88982586fafc608adda6d6280`
-- Final reviewed implementation commit:
+- Last hosted-reviewed implementation commit:
   `b66ee30ef352c9317191118a7226869d17059465`
-- Pull request: `#26`; exact-head automated review completed with no new
-  findings, normal merge pending
+- Final collection-failure remediation: locally verified; commit, push, and
+  exact-head review pending on pull request `#26`
 - Supplier binaries: absent and prohibited
 - WHOOP application transport: unchanged
 - Production supplier adapter: unavailable pending approved artifacts and
@@ -277,7 +277,7 @@ possession proof, firmware flashing, or OTA behavior.
   - focused Swift regressions pass 2/2;
   - focused Kotlin regressions pass 3/3;
   - complete Swift passes 75/75 with one build worker;
-  - complete Kotlin/JVM passes 84/84 with one Gradle worker and
+  - complete Kotlin/JVM passes 86/86 with one Gradle worker and
     `installDist` succeeds;
   - shared conformance passes all 46 ordered scenarios;
   - repository policy passes 63 files;
@@ -301,14 +301,23 @@ possession proof, firmware flashing, or OTA behavior.
     history traversal; three focused selections pass, the complete Kotlin/JVM
     suite passes 85/85 with `installDist`, and all 46 shared conformance
     scenarios plus the 63-file repository gate remain green;
-  - exact-head automated review completed on `b66ee30e` with no new findings;
+  - exact-head review of `b66ee30e` found two stale operations statements and
+    one valid collection-failure defect: a supplier-owned Kotlin list or set
+    could throw `BandException` and select the propagated failure category;
+  - list and set size/iterator access now normalize both `BandException` and
+    runtime failures to fixed `invalidInput`. The direct regression passes,
+    the complete Kotlin/JVM suite passes 86/86 with `installDist`, all 46
+    shared conformance scenarios match, and the 63-file repository gate plus
+    diff hygiene pass;
   - no hosted workflow, supplier runtime, protected merge, export, application
     repin, or physical-device result is claimed yet.
 
 ## Next ordered actions
 
-1. Commit and push this documentation-only evidence correction to PR `#26`.
-2. Reverify the documentation-only exact head and merge normally.
+1. Commit and push the verified collection-failure correction and current
+   evidence to PR `#26`.
+2. Resolve the three matching review threads, require exact-head review, and
+   merge normally only if it is clean.
 3. Export the merged SDK revision twice, verify byte identity, and repin the
    application candidate.
 4. Keep supplier and physical-device gates explicit and separate.

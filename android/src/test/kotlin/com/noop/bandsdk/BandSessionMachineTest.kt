@@ -100,6 +100,52 @@ class BandSessionMachineTest {
         }
     }
 
+    private class CategorizedSizeFailureList<T>(
+        private val category: BandFailureCategory,
+    ) : AbstractList<T>() {
+        override val size: Int
+            get() = throw BandException(category)
+
+        override fun get(index: Int): T =
+            error("size failure must reject before indexed access")
+
+        override fun iterator(): Iterator<T> =
+            error("size failure must reject before iteration")
+    }
+
+    private class CategorizedTraversalFailureList<T>(
+        private val value: T,
+        private val category: BandFailureCategory,
+    ) : AbstractList<T>() {
+        override val size: Int = 1
+        override fun get(index: Int): T = value
+        override fun iterator(): Iterator<T> = object : Iterator<T> {
+            override fun hasNext(): Boolean = true
+            override fun next(): T = throw BandException(category)
+        }
+    }
+
+    private class CategorizedSizeFailureSet<T>(
+        private val category: BandFailureCategory,
+    ) : AbstractSet<T>() {
+        override val size: Int
+            get() = throw BandException(category)
+
+        override fun iterator(): Iterator<T> =
+            error("size failure must reject before iteration")
+    }
+
+    private class CategorizedTraversalFailureSet<T>(
+        private val value: T,
+        private val category: BandFailureCategory,
+    ) : AbstractSet<T>() {
+        override val size: Int = 1
+        override fun iterator(): Iterator<T> = object : Iterator<T> {
+            override fun hasNext(): Boolean = true
+            override fun next(): T = throw BandException(category)
+        }
+    }
+
     private class MutationDuringTraversalSet<T>(
         private val initialValue: T,
         private val addedValue: T,
@@ -1619,6 +1665,111 @@ class BandSessionMachineTest {
             session.stageHistoryChunk(
                 VirtualBandFixtures.historyChunk.copy(
                     batches = SizeFailureList(),
+                ),
+                historyToken,
+                generation,
+            )
+        }
+        assertEquals(BandFailureCategory.INVALID_INPUT, historyError.category)
+        assertEquals(
+            BandDiagnosticEvent(
+                BandDiagnosticKind.HISTORY,
+                BandDiagnosticOutcome.REJECTED,
+                failureCategory = BandFailureCategory.INVALID_INPUT,
+            ),
+            recorder.snapshot().last(),
+        )
+        session.cancelOperation(historyToken)
+    }
+
+    @Test
+    fun supplierBandExceptionsAreNormalizedAndDiagnosed() {
+        fun assertInvalidInput(block: () -> Unit) {
+            assertEquals(
+                BandFailureCategory.INVALID_INPUT,
+                assertFailsWith<BandException> { block() }.category,
+            )
+        }
+
+        val sample = VirtualBandFixtures.liveBatch.samples.first()
+        assertInvalidInput {
+            CategorizedSizeFailureList<BandSample>(
+                BandFailureCategory.BUSY,
+            ).boundedSnapshot(1)
+        }
+        assertInvalidInput {
+            CategorizedTraversalFailureList(
+                sample,
+                BandFailureCategory.STORAGE,
+            ).boundedSnapshot(1)
+        }
+        assertInvalidInput {
+            CategorizedSizeFailureSet<BandStreamKind>(
+                BandFailureCategory.BUSY,
+            ).boundedSnapshot(1)
+        }
+        assertInvalidInput {
+            CategorizedTraversalFailureSet(
+                BandStreamKind.HEART_RATE,
+                BandFailureCategory.STORAGE,
+            ).boundedSnapshot(1)
+        }
+
+        val recorder = BandDiagnosticsRecorder()
+        val (session, generation) = readySession(recorder)
+        val requestedStreamsError = assertFailsWith<BandException> {
+            session.beginLive(
+                CategorizedTraversalFailureSet(
+                    BandStreamKind.HEART_RATE,
+                    BandFailureCategory.BUSY,
+                ),
+            )
+        }
+        assertEquals(
+            BandFailureCategory.INVALID_INPUT,
+            requestedStreamsError.category,
+        )
+        assertEquals(
+            BandDiagnosticEvent(
+                BandDiagnosticKind.LIVE,
+                BandDiagnosticOutcome.REJECTED,
+                failureCategory = BandFailureCategory.INVALID_INPUT,
+            ),
+            recorder.snapshot().last(),
+        )
+
+        val liveToken = session.beginLive()
+        val liveError = assertFailsWith<BandException> {
+            session.stageLiveBatch(
+                VirtualBandFixtures.liveBatch.copy(
+                    samples = CategorizedTraversalFailureList(
+                        sample,
+                        BandFailureCategory.STORAGE,
+                    ),
+                ),
+                liveToken,
+                generation,
+            )
+        }
+        assertEquals(BandFailureCategory.INVALID_INPUT, liveError.category)
+        assertEquals(
+            BandDiagnosticEvent(
+                BandDiagnosticKind.LIVE,
+                BandDiagnosticOutcome.REJECTED,
+                failureCategory = BandFailureCategory.INVALID_INPUT,
+            ),
+            recorder.snapshot().last(),
+        )
+        session.stopLive(liveToken)
+
+        val historyToken =
+            session.beginOperation(BandOperationClass.HISTORY)
+        val historyError = assertFailsWith<BandException> {
+            session.stageHistoryChunk(
+                VirtualBandFixtures.historyChunk.copy(
+                    batches = CategorizedSizeFailureList(
+                        BandFailureCategory.BUSY,
+                    ),
                 ),
                 historyToken,
                 generation,

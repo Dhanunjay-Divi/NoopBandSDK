@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `exact-head review clean; documentation closeout and merge pending`
+- State: `latest review remediation locally verified; commit and push pending`
 - Branch: `codex/sdk-pr17-review-remediation-20260923`
 - Start commit: `3831fb63ae336bd88982586fafc608adda6d6280`
 - Follow-up implementation commit:
@@ -47,6 +47,9 @@ operation disconnect is bound to its issuing session and cannot be replayed.
   `size`, `iterator`, or `next`. A nested capability, live-start, live-batch,
   or history-chunk traversal is rejected before it can recurse, while the
   existing lifecycle fence still catches ordinary state-changing reentrancy.
+- Kotlin list/set snapshots normalize a supplier-thrown `BandException` during
+  `size`, `iterator`, `hasNext`, or `next` to fixed `invalidInput`; the
+  supplier cannot select a diagnostic category such as `busy` or `storage`.
 - Both platforms directly reject operation-derived reconnect credentials from
   another equal-generation session and reject replay after successful resume.
 
@@ -76,7 +79,7 @@ supplier exception, payload, sample, or health value is recorded.
 - Focused Kotlin: all three selected reentrancy and reconnect-authority
   regressions passed, 3/3.
 - Complete Swift package with one build worker: 75/75 tests passed.
-- Complete Kotlin/JVM with one Gradle worker: 84/84 tests passed and
+- Complete Kotlin/JVM with one Gradle worker: 86/86 tests passed and
   `installDist` succeeded.
 - Hosted PR `#26` review identified one valid Kotlin diagnostic-atomicity
   finding. The focused firmware-disconnect regression passed after the batch
@@ -100,10 +103,18 @@ supplier exception, payload, sample, or health value is recorded.
   `/tmp/noop-band-sdk-pr17-independent-review-followup-20260923`.
 - Swift and Kotlin compiler walls ran sequentially. Observed free disk
   remained approximately 13.4 GiB and never crossed the 10 GiB stop floor.
-- Hosted review completed on `830f9fe1` and `ead71b32`, and exact-head
-  automated review completed on `b66ee30e` with no new findings. No hosted
-  workflow, supplier runtime, protected merge, source export, application
-  repin, or physical-device result is claimed yet.
+- Exact-head review of `b66ee30e` found two stale operations statements and
+  one valid Kotlin collection-failure defect. After the correction:
+  - the focused supplier-`BandException` regression passes;
+  - the complete Kotlin/JVM suite passes 86/86 and `installDist` succeeds;
+  - all 46 Swift/Kotlin conformance scenarios match;
+  - the 63-file repository gate, JSON validation, and diff hygiene pass.
+- The first focused invocation failed only because the new local test helper
+  passed a function value to the wrong `assertFailsWith` overload. The helper
+  now invokes that function explicitly; the corrected rerun is the counted
+  result.
+- No hosted workflow, supplier runtime, protected merge, source export,
+  application repin, or physical-device result is claimed yet.
 
 ## External gates
 

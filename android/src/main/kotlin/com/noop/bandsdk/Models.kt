@@ -488,6 +488,8 @@ data class BandHistoryChunk(
 internal fun <T : Any> List<T>.boundedSnapshot(maximumSize: Int): List<T> {
     val expectedSize = try {
         size
+    } catch (_: BandException) {
+        fail(BandFailureCategory.INVALID_INPUT)
     } catch (_: RuntimeException) {
         fail(BandFailureCategory.INVALID_INPUT)
     }
@@ -508,8 +510,8 @@ internal fun <T : Any> List<T>.boundedSnapshot(maximumSize: Int): List<T> {
             @Suppress("UNCHECKED_CAST")
             snapshot += element as T
         }
-    } catch (error: BandException) {
-        throw error
+    } catch (_: BandException) {
+        fail(BandFailureCategory.INVALID_INPUT)
     } catch (_: RuntimeException) {
         fail(BandFailureCategory.INVALID_INPUT)
     }
@@ -522,6 +524,8 @@ internal fun <T : Any> List<T>.boundedSnapshot(maximumSize: Int): List<T> {
 internal fun <T : Any> Set<T>.boundedSnapshot(maximumSize: Int): Set<T> {
     val expectedSize = try {
         size
+    } catch (_: BandException) {
+        fail(BandFailureCategory.INVALID_INPUT)
     } catch (_: RuntimeException) {
         fail(BandFailureCategory.INVALID_INPUT)
     }
@@ -544,8 +548,8 @@ internal fun <T : Any> Set<T>.boundedSnapshot(maximumSize: Int): Set<T> {
             @Suppress("UNCHECKED_CAST")
             snapshot += element as T
         }
-    } catch (error: BandException) {
-        throw error
+    } catch (_: BandException) {
+        fail(BandFailureCategory.INVALID_INPUT)
     } catch (_: RuntimeException) {
         fail(BandFailureCategory.INVALID_INPUT)
     }
