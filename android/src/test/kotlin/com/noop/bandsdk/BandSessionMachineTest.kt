@@ -1023,35 +1023,60 @@ class BandSessionMachineTest {
     }
 
     @Test
-    fun beginLiveRevalidatesAfterSameThreadRequestedSetReentrancy() {
-        val recorder = BandDiagnosticsRecorder()
-        val (session, generation) = readySession(recorder)
-        val eventCount = recorder.snapshot().size
-        val requested = ReentrantTraversalSet(
-            setOf(BandStreamKind.HEART_RATE),
+    fun beginLiveRejectsStateMutationDuringCallerOwnedTraversal() {
+        fun verifyRejectedMutation(
+            nestedKind: BandDiagnosticKind,
+            mutate: (BandSessionMachine, Long) -> Unit,
         ) {
+            val recorder = BandDiagnosticsRecorder()
+            val (session, generation) = readySession(recorder)
+            val before = session.snapshot()
+            val eventCount = recorder.snapshot().size
+            val requested = ReentrantTraversalSet(
+                setOf(BandStreamKind.HEART_RATE),
+            ) {
+                mutate(session, generation)
+            }
+
+            val error = assertFailsWith<BandException> {
+                session.beginLive(requested)
+            }
+
+            assertEquals(BandFailureCategory.INVALID_INPUT, error.category)
+            assertEquals(before, session.snapshot())
+            assertEquals(
+                listOf(
+                    BandDiagnosticEvent(
+                        nestedKind,
+                        BandDiagnosticOutcome.REJECTED,
+                        failureCategory = BandFailureCategory.INVALID_INPUT,
+                    ),
+                    BandDiagnosticEvent(
+                        BandDiagnosticKind.LIVE,
+                        BandDiagnosticOutcome.REJECTED,
+                        failureCategory = BandFailureCategory.INVALID_INPUT,
+                    ),
+                ),
+                recorder.snapshot().drop(eventCount),
+            )
+
+            session.beginLive()
+            assertEquals(
+                BandSessionState.LIVE_COLLECTING,
+                session.snapshot().state,
+            )
+        }
+
+        verifyRejectedMutation(BandDiagnosticKind.DISCONNECT) { session, _ ->
             session.close()
         }
-
-        val error = assertFailsWith<BandException> {
-            session.beginLive(requested)
+        verifyRejectedMutation(BandDiagnosticKind.DISCONNECT) {
+                session, generation ->
+            session.disconnect(
+                BandDisconnectReason.USER_PAUSED,
+                generation,
+            )
         }
-
-        assertEquals(BandFailureCategory.STALE_CALLBACK, error.category)
-        val closed = session.snapshot()
-        assertEquals(BandSessionState.CLOSED, closed.state)
-        assertEquals(generation + 1, closed.generation)
-        assertFalse(closed.liveActive)
-        assertEquals(
-            listOf(
-                BandDiagnosticEvent(
-                    BandDiagnosticKind.LIVE,
-                    BandDiagnosticOutcome.STALE,
-                    failureCategory = BandFailureCategory.STALE_CALLBACK,
-                ),
-            ),
-            recorder.snapshot().drop(eventCount),
-        )
     }
 
     @Test
@@ -1157,10 +1182,10 @@ class BandSessionMachineTest {
     }
 
     @Test
-    fun otherCallerOwnedSnapshotsRevalidateAfterSameThreadReentrancy() {
-        fun assertStale(block: () -> Unit) {
+    fun otherCallerOwnedSnapshotsRejectStateMutationReentrancy() {
+        fun assertInvalidInput(block: () -> Unit) {
             val error = assertFailsWith<BandException>(block = block)
-            assertEquals(BandFailureCategory.STALE_CALLBACK, error.category)
+            assertEquals(BandFailureCategory.INVALID_INPUT, error.category)
         }
 
         run {
@@ -1174,14 +1199,17 @@ class BandSessionMachineTest {
                 },
             )
 
-            assertStale {
+            assertInvalidInput {
                 session.acceptCapabilities(
                     report,
                     connectionToken,
                     generation,
                 )
             }
-            assertEquals(BandSessionState.CLOSED, session.snapshot().state)
+            assertEquals(
+                BandSessionState.INCOMPATIBLE,
+                session.snapshot().state,
+            )
         }
 
         run {
@@ -1195,10 +1223,13 @@ class BandSessionMachineTest {
                 },
             )
 
-            assertStale {
+            assertInvalidInput {
                 session.stageLiveBatch(batch, liveToken, generation)
             }
-            assertEquals(BandSessionState.CLOSED, session.snapshot().state)
+            assertEquals(
+                BandSessionState.LIVE_COLLECTING,
+                session.snapshot().state,
+            )
         }
 
         run {
@@ -1213,10 +1244,13 @@ class BandSessionMachineTest {
                 },
             )
 
-            assertStale {
+            assertInvalidInput {
                 session.stageHistoryChunk(chunk, operation, generation)
             }
-            assertEquals(BandSessionState.CLOSED, session.snapshot().state)
+            assertEquals(
+                BandOperationClass.HISTORY,
+                session.snapshot().activeOperation,
+            )
         }
     }
 

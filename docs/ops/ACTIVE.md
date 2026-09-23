@@ -4,6 +4,7 @@ Last updated: **2026-09-23**
 
 ## Current round
 
+- [Kotlin public-entry reentry guard](rounds/2026-09-23-kotlin-public-entry-reentry-guard.md)
 - [PR 17 independent-review follow-up](rounds/2026-09-23-pr17-independent-review-followup.md)
 - [PR 17 review remediation](rounds/2026-09-23-pr17-review-remediation.md)
 - [Established-session callback authority](rounds/2026-09-23-established-session-authority.md)
@@ -13,17 +14,25 @@ Last updated: **2026-09-23**
 
 ## Current boundary
 
-- Integration branch: `codex/sdk-pr17-review-remediation-20260923`
+- Integration branch: `codex/sdk-reentry-guard-20260923`
 - GitHub branch protection: absent as of 2026-09-22; PR-only discipline is
   procedural, not enforced by a repository rule
-- Active branch: `codex/sdk-pr17-review-remediation-20260923`
-- Start commit: `650c89e45ca2ab28e14e76e447a7026479e42b4e`
+- Active branch: `codex/sdk-reentry-guard-20260923`
+- Start commit: `eb5d6d4c6171efaa87a8e36a3c4ba3906efbfb2c`
+- Reentry-guard implementation commit:
+  `a9b66a9042d95559d9c74e892d13898dc9d79c65`
 - Reviewed implementation commit:
   `3831fb63ae336bd88982586fafc608adda6d6280`
 - Last hosted-reviewed implementation commit:
   `b66ee30ef352c9317191118a7226869d17059465`
-- Final collection-failure remediation: locally verified; commit, push, and
-  exact-head review pending on pull request `#26`
+- Protected source through pull request `#26` is merged at `eb5d6d4c`.
+- The current follow-up closes one remaining Kotlin monitor-reentrancy path
+  before the next source export. All 29 public synchronized entries now reject
+  nested caller-owned traversal before session mutation. Focused regressions,
+  Kotlin 86/86 plus `installDist`, Swift 75/75, 46 shared conformance
+  scenarios, the 64-file repository policy gate, JSON parsing, and diff
+  hygiene pass locally. Commit, normal pull-request integration, clean export,
+  and application repin remain.
 - Supplier binaries: absent and prohibited
 - WHOOP application transport: unchanged
 - Production supplier adapter: unavailable pending approved artifacts and
