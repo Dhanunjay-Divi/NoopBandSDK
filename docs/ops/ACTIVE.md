@@ -13,7 +13,8 @@ Last updated: **2026-09-23**
   procedural, not enforced by a repository rule
 - Active branch: `codex/sdk-pr17-exact-review-remediation-20260922`
 - Start commit: `9bc2eedce34c61d49f68001a973fbbda793d04ed`
-- Implementation commit: pending
+- Implementation commit:
+  `c0652fd89a9cb248617e578c6cd8498960c8c302`
 - PR merge: pending
 - Supplier binaries: absent and prohibited
 - WHOOP application transport: unchanged

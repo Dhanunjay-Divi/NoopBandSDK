@@ -5,7 +5,8 @@
 - State: `verified PR candidate`
 - Branch: `codex/sdk-pr17-exact-review-remediation-20260922`
 - Start commit: `9bc2eedce34c61d49f68001a973fbbda793d04ed`
-- Implementation commit: pending
+- Implementation commit:
+  `c0652fd89a9cb248617e578c6cd8498960c8c302`
 - Pull request: pending
 - Supplier artifacts: absent
 - Physical-device claims: unchanged and unproven
