@@ -288,20 +288,57 @@ struct BandSessionMachineTests {
     @Test("Scan token string rendering is redacted")
     func scanTokenStringRenderingIsRedacted() async throws {
         let token = try await BandSessionMachine().beginScan()
-        #expect(String(describing: token) == "BandScanToken")
-        #expect(String(reflecting: token) == "BandScanToken")
+        expectRedacted(token, as: "BandScanToken")
+    }
 
-        var dumpOutput = ""
-        dump(token, to: &dumpOutput)
-        #expect(dumpOutput.contains("BandScanToken"))
-        #expect(!dumpOutput.contains("sessionNonce"))
-        #expect(!dumpOutput.contains("generation"))
-        #expect(
-            dumpOutput.range(
-                of: #"[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}"#,
-                options: .regularExpression
-            ) == nil
+    @Test("Tokens, acceptances, and receipts are structurally redacted")
+    func persistenceHandoffValuesAreRedacted() async throws {
+        let (session, generation, connectionToken) =
+            try await readySessionWithToken()
+        let liveToken = try await session.beginLive()
+        let liveAcceptance = try await session.stageLiveBatch(
+            VirtualBandFixtures.liveBatch,
+            token: liveToken,
+            callbackGeneration: generation
         )
+        let liveReceipt = DurableLiveReceipt(
+            acceptance: liveAcceptance,
+            committedSamples: liveAcceptance.acceptedSamples.count,
+            committed: true
+        )
+        try await session.acknowledgeLive(
+            receipt: liveReceipt,
+            callbackGeneration: generation
+        )
+        try await session.stopLive(token: liveToken)
+
+        let operationToken = try await session.beginOperation(.history)
+        let historyAcceptance = try await session.stageHistoryChunk(
+            VirtualBandFixtures.historyChunk,
+            token: operationToken,
+            callbackGeneration: generation
+        )
+        let historyReceipt = DurableHistoryReceipt(
+            acceptance: historyAcceptance,
+            historyStateCommitted: true,
+            committedSamples: historyAcceptance.acceptedSamples.count,
+            committed: true
+        )
+        let acceptedHistorySample = try #require(
+            historyAcceptance.acceptedSamples.first
+        )
+
+        expectRedacted(connectionToken, as: "BandConnectionToken")
+        expectRedacted(liveToken, as: "BandLiveToken")
+        expectRedacted(operationToken, as: "BandOperationToken")
+        expectRedacted(liveAcceptance, as: "LiveAcceptance")
+        expectRedacted(
+            acceptedHistorySample,
+            as: "AcceptedHistorySample"
+        )
+        expectRedacted(liveReceipt, as: "DurableLiveReceipt")
+        expectRedacted(historyAcceptance, as: "HistoryAcceptance")
+        expectRedacted(historyReceipt, as: "DurableHistoryReceipt")
     }
 
     @Test("Receipts and operation tokens are bound to one session")
@@ -603,7 +640,7 @@ struct BandSessionMachineTests {
             receipt: await store.commit(acceptance: liveAcceptance),
             callbackGeneration: generation
         )
-        try await session.stopLive()
+        try await session.stopLive(token: liveToken)
 
         let token = try await session.beginOperation(.history)
         let sourceBatch = try #require(
@@ -1037,7 +1074,7 @@ struct BandSessionMachineTests {
         let (session, generation) = try await readySession(
             diagnostics: recorder
         )
-        _ = try await session.beginLive()
+        let liveToken = try await session.beginLive()
         await recorder.requestNextRecordSuspensionForTesting()
 
         let disconnectTask = Task {
@@ -1048,8 +1085,8 @@ struct BandSessionMachineTests {
         }
         await recorder.waitForRecordSuspensionForTesting()
 
-        await #expect(throws: BandFailureCategory.invalidState) {
-            try await session.stopLive()
+        await #expect(throws: BandFailureCategory.staleCallback) {
+            try await session.stopLive(token: liveToken)
         }
         let disconnecting = await session.snapshot()
         #expect(disconnecting.state == .disconnecting)
@@ -1067,8 +1104,8 @@ struct BandSessionMachineTests {
             events.contains(
                 BandDiagnosticEvent(
                     kind: .live,
-                    outcome: .rejected,
-                    failureCategory: .invalidState
+                    outcome: .stale,
+                    failureCategory: .staleCallback
                 )
             )
         )
@@ -1123,10 +1160,14 @@ struct BandSessionMachineTests {
     @Test("Established authentication failures terminate ready and live sessions")
     func establishedAuthenticationFailuresTerminateSession() async throws {
         let readyRecorder = BandDiagnosticsRecorder()
-        let (readyFailureSession, readyGeneration) =
-            try await readySession(diagnostics: readyRecorder)
+        let (
+            readyFailureSession,
+            readyGeneration,
+            readyConnectionToken
+        ) = try await readySessionWithToken(diagnostics: readyRecorder)
         try await readyFailureSession.failEstablishedSession(
             .authentication,
+            token: readyConnectionToken,
             callbackGeneration: readyGeneration
         )
         let rejected = await readyFailureSession.snapshot()
@@ -1141,11 +1182,15 @@ struct BandSessionMachineTests {
         )
 
         let liveRecorder = BandDiagnosticsRecorder()
-        let (liveFailureSession, liveGeneration) =
-            try await readySession(diagnostics: liveRecorder)
+        let (
+            liveFailureSession,
+            liveGeneration,
+            liveConnectionToken
+        ) = try await readySessionWithToken(diagnostics: liveRecorder)
         _ = try await liveFailureSession.beginLive()
         try await liveFailureSession.failEstablishedSession(
             .securityFailure,
+            token: liveConnectionToken,
             callbackGeneration: liveGeneration
         )
         let secured = await liveFailureSession.snapshot()
@@ -1153,21 +1198,111 @@ struct BandSessionMachineTests {
         #expect(secured.generation == liveGeneration + 1)
         #expect(!secured.liveActive)
 
-        let (invalidFailureSession, invalidGeneration) = try await readySession()
+        let (
+            invalidFailureSession,
+            invalidGeneration,
+            invalidConnectionToken
+        ) = try await readySessionWithToken()
         await #expect(throws: BandFailureCategory.invalidInput) {
             try await invalidFailureSession.failEstablishedSession(
                 .timeout,
+                token: invalidConnectionToken,
                 callbackGeneration: invalidGeneration
             )
         }
         #expect(await invalidFailureSession.snapshot().state == .ready)
     }
 
+    @Test("Established failures require the active connection token")
+    func establishedFailuresRejectForeignConnectionToken() async throws {
+        let (_, firstGeneration, firstToken) =
+            try await readySessionWithToken()
+        let (second, secondGeneration, secondToken) =
+            try await readySessionWithToken()
+        #expect(firstGeneration == secondGeneration)
+
+        await #expect(throws: BandFailureCategory.staleCallback) {
+            try await second.failEstablishedSession(
+                .authentication,
+                token: firstToken,
+                callbackGeneration: secondGeneration
+            )
+        }
+        #expect(await second.snapshot().state == .ready)
+
+        try await second.failEstablishedSession(
+            .authentication,
+            token: secondToken,
+            callbackGeneration: secondGeneration
+        )
+        #expect(await second.snapshot().state == .rejected)
+    }
+
+    @Test("Reconnect issues new established-session authority")
+    func reconnectIssuesNewConnectionToken() async throws {
+        let (session, generation, originalToken) =
+            try await readySessionWithToken()
+        let reconnectGeneration = try await session.interruptForReconnect(
+            callbackGeneration: generation
+        )
+        let reconnectToken = try await session.resumeAfterReconnect(
+            callbackGeneration: reconnectGeneration
+        )
+
+        await #expect(throws: BandFailureCategory.staleCallback) {
+            try await session.failEstablishedSession(
+                .authentication,
+                token: originalToken,
+                callbackGeneration: reconnectGeneration
+            )
+        }
+        #expect(await session.snapshot().state == .ready)
+
+        try await session.failEstablishedSession(
+            .authentication,
+            token: reconnectToken,
+            callbackGeneration: reconnectGeneration
+        )
+        #expect(await session.snapshot().state == .rejected)
+    }
+
+    @Test("Reconnect token survives live start during diagnostics")
+    func reconnectTokenSurvivesLiveStartDuringDiagnostics() async throws {
+        let recorder = BandDiagnosticsRecorder(capacity: 64)
+        let (session, generation, _) = try await readySessionWithToken(
+            diagnostics: recorder
+        )
+        let reconnectGeneration = try await session.interruptForReconnect(
+            callbackGeneration: generation
+        )
+        await recorder.requestNextRecordSuspensionForTesting()
+
+        let resumeTask = Task {
+            try await session.resumeAfterReconnect(
+                callbackGeneration: reconnectGeneration
+            )
+        }
+        await recorder.waitForRecordSuspensionForTesting()
+        _ = try await session.beginLive()
+        #expect(await session.snapshot().state == .liveCollecting)
+
+        await recorder.resumeSuspendedRecordForTesting()
+        let reconnectToken = try await resumeTask.value
+        try await session.failEstablishedSession(
+            .authentication,
+            token: reconnectToken,
+            callbackGeneration: reconnectGeneration
+        )
+        let rejected = await session.snapshot()
+        #expect(rejected.state == .rejected)
+        #expect(!rejected.liveActive)
+    }
+
     @Test("Established failure waits for a pending live receipt")
     func establishedFailureWaitsForPendingLiveReceipt() async throws {
         let recorder = BandDiagnosticsRecorder()
-        let (session, generation) =
-            try await readySession(diagnostics: recorder)
+        let (session, generation, connectionToken) =
+            try await readySessionWithToken(diagnostics: recorder)
         let liveToken = try await session.beginLive()
         let acceptance = try await session.stageLiveBatch(
             VirtualBandFixtures.liveBatch,
@@ -1178,6 +1313,7 @@ struct BandSessionMachineTests {
         await #expect(throws: BandFailureCategory.busy) {
             try await session.failEstablishedSession(
                 .authentication,
+                token: connectionToken,
                 callbackGeneration: generation
             )
         }
@@ -1203,9 +1339,27 @@ struct BandSessionMachineTests {
         )
         try await session.failEstablishedSession(
             .authentication,
+            token: connectionToken,
             callbackGeneration: generation
         )
         #expect(await session.snapshot().state == .rejected)
+    }
+
+    @Test("Stopping live requires the active live token")
+    func stopLiveRejectsSupersededToken() async throws {
+        let (session, _) = try await readySession()
+        let firstToken = try await session.beginLive()
+        try await session.stopLive(token: firstToken)
+        let secondToken = try await session.beginLive()
+
+        await #expect(throws: BandFailureCategory.staleCallback) {
+            try await session.stopLive(token: firstToken)
+        }
+        #expect(await session.snapshot().state == .liveCollecting)
+        #expect(await session.snapshot().liveActive)
+
+        try await session.stopLive(token: secondToken)
+        #expect(await session.snapshot().state == .ready)
     }
 
     @Test("Live and history streams are negotiated per lane")
@@ -1321,7 +1475,7 @@ struct BandSessionMachineTests {
             ),
             callbackGeneration: liveGeneration
         )
-        try await liveSession.stopLive()
+        try await liveSession.stopLive(token: liveToken)
 
         await #expect(throws: BandFailureCategory.unsupported) {
             _ = try await liveSession.beginOperation(.history)
@@ -2223,7 +2377,7 @@ struct BandSessionMachineTests {
                 callbackGeneration: generation
             )
         }
-        try await session.stopLive()
+        try await session.stopLive(token: liveToken)
 
         let events = await recorder.snapshot()
         let connectionOutcomes = events
@@ -2278,7 +2432,7 @@ struct BandSessionMachineTests {
             ),
             callbackGeneration: generation
         )
-        try await session.stopLive()
+        try await session.stopLive(token: restartLiveToken)
         let restartedEvents = await recorder.snapshot()
         #expect(
             restartedEvents.filter {
@@ -2464,6 +2618,27 @@ struct BandSessionMachineTests {
         await recorder.snapshot()
             .filter { $0.outcome == .cancelled }
             .map(\.kind)
+    }
+
+    private func expectRedacted<T>(_ value: T, as name: String) {
+        #expect(String(describing: value) == name)
+        #expect(String(reflecting: value) == name)
+
+        var dumpOutput = ""
+        dump(value, to: &dumpOutput)
+        #expect(dumpOutput.contains(name))
+        #expect(!dumpOutput.contains("sessionNonce"))
+        #expect(!dumpOutput.contains("generation"))
+        #expect(!dumpOutput.contains("acceptedSamples"))
+        #expect(!dumpOutput.contains("virtual-source"))
+        #expect(!dumpOutput.contains("ack-1"))
+        #expect(!dumpOutput.contains("72.0"))
+        #expect(
+            dumpOutput.range(
+                of: #"[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}"#,
+                options: .regularExpression
+            ) == nil
+        )
     }
 
     private func negotiatingSession(

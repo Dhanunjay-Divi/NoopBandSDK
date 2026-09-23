@@ -4,19 +4,22 @@ Last updated: **2026-09-23**
 
 ## Current round
 
+- [Established-session callback authority](rounds/2026-09-23-established-session-authority.md)
 - [Scan-token consumption parity](rounds/2026-09-23-scan-token-consumption-parity.md)
 - [Kotlin scan-token identity](rounds/2026-09-23-kotlin-scan-token-identity.md)
 - [Application PR 17 exact-head remediation](rounds/2026-09-23-app-pr17-exact-head-remediation.md)
 
 ## Current boundary
 
-- Integration branch: `codex/sdk-scan-token-consumption-20260923`
+- Integration branch: `codex/sdk-pr25-session-authority-20260923`
 - GitHub branch protection: absent as of 2026-09-22; PR-only discipline is
   procedural, not enforced by a repository rule
-- Active branch: `codex/sdk-scan-token-consumption-20260923`
-- Start commit: `1b4c614e180a58130c3d1c5967841affe754242d`
-- Implementation commit:
-  `8338e503f3a002cf5e4f99b4265b2ad82b203596`
+- Active branch: `codex/sdk-pr25-session-authority-20260923`
+- Start commit: `f20f4ed552328a64a8a598aaac72befa1d481262`
+- Implementation commits:
+  `4fdef89d6047a270e90b6b0434461a7aca2ed10e`,
+  `2281b3665b2cf83f8445f4fdd52b373925bec551`
+- Evidence commit: this documentation-only commit
 - PR merge: pending
 - Supplier binaries: absent and prohibited
 - WHOOP application transport: unchanged
@@ -97,6 +100,13 @@ possession proof, firmware flashing, or OTA behavior.
   callbacks produced a different failure category than Kotlin. The active
   round aligns consumed-token behavior and adds a shared post-selection
   callback scenario.
+- SDK PR `#24` merged scan-token consumption parity at `f20f4ed`. Exact
+  application review then found two narrower authority defects: established
+  session failures were generation-bound rather than connection-token-bound,
+  and tokenless live stop could terminate a replacement live lease. The
+  active correction requires the exact connection/live token on both
+  platforms, migrates all call sites, and redacts every Swift persistence
+  handoff value from default rendering and reflection.
 
 ## Current evidence
 
@@ -206,6 +216,27 @@ possession proof, firmware flashing, or OTA behavior.
   - corrected exact-diff re-review found no remaining P0-P2 issue;
   - commit, PR, merge, deterministic export, and application repin remain
     pending.
+- Current established-session authority correction:
+  - Swift package passes 69/69 tests;
+  - Kotlin/JVM tests and `installDist` pass;
+  - shared conformance passes 45/45 ordered scenarios;
+  - repository policy passes 61 files;
+  - JSON parsing, bounded secret-pattern review, and diff hygiene pass;
+  - the first conformance invocation detected stale pre-change executables;
+    both binaries were rebuilt and the required rerun passed all 44 scenarios;
+  - initial independent review found that reconnect did not issue replacement
+    connection authority; both platforms now return a fresh token and the
+    retired token remains stale;
+  - focused re-review found a Swift actor-reentrancy path that could make the
+    replacement token inaccessible after a concurrent live start; the
+    post-suspension guard now preserves exact token authority and the direct
+    suspended-record regression passes;
+  - final exact-diff re-review reports no remaining P0-P2 finding;
+  - two independently generated source exports from implementation head
+    `2281b366` are byte-identical; the candidate manifest SHA-256 is
+    `d980188805fc7e1424501c365773e0b65542c163077d481fa266b91925d563ac`;
+  - publication commit, PR, merge, deterministic exports, and application
+    repin remain pending.
 
 ## Next ordered actions
 
