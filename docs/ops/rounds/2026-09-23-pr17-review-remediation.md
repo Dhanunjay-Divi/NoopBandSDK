@@ -2,11 +2,11 @@
 
 ## Status
 
-- State: `locally verified; committed by this record`
+- State: `implementation complete; superseded by reviewed follow-up`
 - Branch: `codex/sdk-pr17-review-remediation-20260923`
 - Start commit: `650c89e45ca2ab28e14e76e447a7026479e42b4e`
-- Implementation commit: this commit
-- Pull request: not requested
+- Implementation commit: `3831fb63ae336bd88982586fafc608adda6d6280`
+- Pull request: `#26`
 - Supplier artifacts: absent and prohibited
 - Physical-device claims: unchanged and unproven
 - Independent review of implementation commit

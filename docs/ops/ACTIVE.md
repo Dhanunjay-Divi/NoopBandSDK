@@ -20,8 +20,10 @@ Last updated: **2026-09-23**
 - Start commit: `650c89e45ca2ab28e14e76e447a7026479e42b4e`
 - Reviewed implementation commit:
   `3831fb63ae336bd88982586fafc608adda6d6280`
-- Follow-up implementation commit: this commit
-- Pull request: not requested
+- Final reviewed implementation commit:
+  `b66ee30ef352c9317191118a7226869d17059465`
+- Pull request: `#26`; exact-head automated review completed with no new
+  findings, normal merge pending
 - Supplier binaries: absent and prohibited
 - WHOOP application transport: unchanged
 - Production supplier adapter: unavailable pending approved artifacts and
@@ -299,14 +301,14 @@ possession proof, firmware flashing, or OTA behavior.
     history traversal; three focused selections pass, the complete Kotlin/JVM
     suite passes 85/85 with `installDist`, and all 46 shared conformance
     scenarios plus the 63-file repository gate remain green;
+  - exact-head automated review completed on `b66ee30e` with no new findings;
   - no hosted workflow, supplier runtime, protected merge, export, application
     repin, or physical-device result is claimed yet.
 
 ## Next ordered actions
 
-1. Commit and push the verified hosted-review correction to PR `#26`.
-2. Resolve the exact review thread, reverify the final PR head, and merge
-   normally.
-3. Export the protected SDK merge twice, verify byte identity, and repin the
+1. Commit and push this documentation-only evidence correction to PR `#26`.
+2. Reverify the documentation-only exact head and merge normally.
+3. Export the merged SDK revision twice, verify byte identity, and repin the
    application candidate.
 4. Keep supplier and physical-device gates explicit and separate.

@@ -2,12 +2,13 @@
 
 ## Status
 
-- State: `hosted-review follow-up locally verified; final commit and push pending`
+- State: `exact-head review clean; documentation closeout and merge pending`
 - Branch: `codex/sdk-pr17-review-remediation-20260923`
 - Start commit: `3831fb63ae336bd88982586fafc608adda6d6280`
 - Follow-up implementation commit:
   `830f9fe1721cc0e842e77b767adecc31ec98ab3b`
-- Hosted-review follow-up commit: this commit
+- Final reviewed implementation commit:
+  `b66ee30ef352c9317191118a7226869d17059465`
 - Pull request: `#26`
 - Supplier artifacts: absent and prohibited
 - Physical-device claims: unchanged and unproven
@@ -99,9 +100,10 @@ supplier exception, payload, sample, or health value is recorded.
   `/tmp/noop-band-sdk-pr17-independent-review-followup-20260923`.
 - Swift and Kotlin compiler walls ran sequentially. Observed free disk
   remained approximately 13.4 GiB and never crossed the 10 GiB stop floor.
-- Hosted review completed on `830f9fe1` and `ead71b32`; no hosted workflow,
-  supplier runtime, protected merge, source export, application repin, or
-  physical-device result is claimed yet.
+- Hosted review completed on `830f9fe1` and `ead71b32`, and exact-head
+  automated review completed on `b66ee30e` with no new findings. No hosted
+  workflow, supplier runtime, protected merge, source export, application
+  repin, or physical-device result is claimed yet.
 
 ## External gates
 
