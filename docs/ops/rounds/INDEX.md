@@ -1,5 +1,6 @@
 # NOOP Band SDK operations rounds
 
+- [2026-09-23 - Application PR 17 final review closeout](2026-09-23-app-pr17-final-review-closeout.md)
 - [2026-09-23 - Capability report equivalence](2026-09-23-capability-report-equivalence.md)
 - [2026-09-23 - PR 17 final contract closeout](2026-09-23-pr17-final-contract-closeout.md)
 - [2026-09-23 - Kotlin public-entry reentry guard](2026-09-23-kotlin-public-entry-reentry-guard.md)

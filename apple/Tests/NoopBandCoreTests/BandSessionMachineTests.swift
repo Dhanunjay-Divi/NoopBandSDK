@@ -2121,6 +2121,66 @@ struct BandSessionMachineTests {
         )
     }
 
+    @Test("Capability completion is revalidated after diagnostic suspension")
+    func capabilityCompletionIsNotReturnedAfterDisconnect() async throws {
+        let recorder = BandDiagnosticsRecorder(capacity: 64)
+        let (session, generation, connectionToken) =
+            try await negotiatingSessionWithToken(diagnostics: recorder)
+        await recorder.requestNextRecordSuspensionForTesting()
+
+        let capabilityTask = Task {
+            try await session.acceptCapabilities(
+                VirtualBandFixtures.capabilities,
+                token: connectionToken,
+                callbackGeneration: generation
+            )
+        }
+        await recorder.waitForRecordSuspensionForTesting()
+        let idleGeneration = try await session.disconnect(
+            reason: .userPaused,
+            callbackGeneration: generation
+        )
+        #expect(idleGeneration == generation + 1)
+        #expect(await session.snapshot().state == .idle)
+
+        await recorder.resumeSuspendedRecordForTesting()
+        await #expect(throws: BandFailureCategory.staleCallback) {
+            try await capabilityTask.value
+        }
+        #expect(await session.snapshot().state == .idle)
+        #expect(
+            await recorder.snapshot().last == BandDiagnosticEvent(
+                kind: .capability,
+                outcome: .stale,
+                failureCategory: .staleCallback
+            )
+        )
+    }
+
+    @Test("Capability completion permits valid live progress")
+    func capabilityCompletionPermitsValidLiveProgress() async throws {
+        let recorder = BandDiagnosticsRecorder(capacity: 64)
+        let (session, generation, connectionToken) =
+            try await negotiatingSessionWithToken(diagnostics: recorder)
+        await recorder.requestNextRecordSuspensionForTesting()
+
+        let capabilityTask = Task {
+            try await session.acceptCapabilities(
+                VirtualBandFixtures.capabilities,
+                token: connectionToken,
+                callbackGeneration: generation
+            )
+        }
+        await recorder.waitForRecordSuspensionForTesting()
+        let liveToken = try await session.beginLive()
+        #expect(await session.snapshot().state == .liveCollecting)
+
+        await recorder.resumeSuspendedRecordForTesting()
+        try await capabilityTask.value
+        #expect(await session.snapshot().state == .liveCollecting)
+        try await session.stopLive(token: liveToken)
+    }
+
     @Test("Scan generation is revalidated after diagnostic suspension")
     func scanGenerationIsNotReturnedAfterClose() async throws {
         let recorder = BandDiagnosticsRecorder(capacity: 64)
@@ -2386,6 +2446,7 @@ struct BandSessionMachineTests {
             liveConnectionToken
         ) = try await readySessionWithToken(diagnostics: liveRecorder)
         _ = try await liveFailureSession.beginLive()
+        let liveFailureEventCount = await liveRecorder.snapshot().count
         try await liveFailureSession.failEstablishedSession(
             .securityFailure,
             token: liveConnectionToken,
@@ -2395,6 +2456,24 @@ struct BandSessionMachineTests {
         #expect(secured.state == .securityFailure)
         #expect(secured.generation == liveGeneration + 1)
         #expect(!secured.liveActive)
+        #expect(
+            Array(
+                await liveRecorder.snapshot().dropFirst(
+                    liveFailureEventCount
+                )
+            ) == [
+                BandDiagnosticEvent(
+                    kind: .live,
+                    outcome: .interrupted,
+                    failureCategory: .securityFailure
+                ),
+                BandDiagnosticEvent(
+                    kind: .authentication,
+                    outcome: .rejected,
+                    failureCategory: .securityFailure
+                ),
+            ]
+        )
 
         let (
             invalidFailureSession,

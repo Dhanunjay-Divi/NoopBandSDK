@@ -4,6 +4,7 @@ Last updated: **2026-09-23**
 
 ## Current round
 
+- [Application PR 17 final review closeout](rounds/2026-09-23-app-pr17-final-review-closeout.md)
 - [Capability report equivalence](rounds/2026-09-23-capability-report-equivalence.md)
 - [PR 17 final contract closeout](rounds/2026-09-23-pr17-final-contract-closeout.md)
 - [Kotlin public-entry reentry guard](rounds/2026-09-23-kotlin-public-entry-reentry-guard.md)
@@ -16,6 +17,17 @@ Last updated: **2026-09-23**
 
 ## Current boundary
 
+- Application PR `#17` final review closeout is locally green on branch
+  `codex/sdk-pr30-final-review-20260923` from protected SDK main
+  `38cf7de3`. Apple capability completion now revalidates exact authority after
+  its diagnostic suspension, both platforms terminate an active live
+  diagnostic before an established authentication/security terminal, and
+  Android explicitly preserves capability-validation categories during
+  initial negotiation. Exact-current evidence passes Swift `93/93`,
+  Kotlin/JVM tests plus `installDist`, shared conformance `50/50`, and the
+  `68`-file repository gate. Independent review, normal SDK integration, clean
+  export, application repin, hosted exact-head checks, and protected app
+  integration remain.
 - Integration branch: `codex/sdk-capability-equivalence-20260923`
 - GitHub branch protection: absent as of 2026-09-22; PR-only discipline is
   procedural, not enforced by a repository rule

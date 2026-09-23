@@ -527,9 +527,18 @@ class BandSessionMachine(
         )
         try {
             immutableReport.validate()
-        } catch (_: BandException) {
+        } catch (error: BandException) {
             if (state == BandSessionState.NEGOTIATING_CAPABILITIES) {
-                rejectCapabilities(mutateSession = true)
+                state = BandSessionState.INCOMPATIBLE
+                capabilityReport = null
+                diagnostics.record(
+                    BandDiagnosticEvent(
+                        BandDiagnosticKind.CAPABILITY,
+                        BandDiagnosticOutcome.REJECTED,
+                        failureCategory = error.category,
+                    ),
+                )
+                fail(error.category)
             }
             diagnostics.record(
                 BandDiagnosticEvent(
@@ -712,6 +721,7 @@ class BandSessionMachine(
             fail(BandFailureCategory.INVALID_INPUT)
         }
 
+        val liveWasActive = liveActive
         invalidateAuthenticatedSession(
             if (category == BandFailureCategory.SECURITY_FAILURE) {
                 BandSessionState.SECURITY_FAILURE
@@ -720,11 +730,24 @@ class BandSessionMachine(
             },
         )
         diagnostics.record(
-            BandDiagnosticEvent(
-                BandDiagnosticKind.AUTHENTICATION,
-                BandDiagnosticOutcome.REJECTED,
-                failureCategory = category,
-            ),
+            buildList {
+                if (liveWasActive) {
+                    add(
+                        BandDiagnosticEvent(
+                            BandDiagnosticKind.LIVE,
+                            BandDiagnosticOutcome.INTERRUPTED,
+                            failureCategory = category,
+                        ),
+                    )
+                }
+                add(
+                    BandDiagnosticEvent(
+                        BandDiagnosticKind.AUTHENTICATION,
+                        BandDiagnosticOutcome.REJECTED,
+                        failureCategory = category,
+                    ),
+                )
+            },
         )
     }
 

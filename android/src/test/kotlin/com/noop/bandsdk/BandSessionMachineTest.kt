@@ -974,6 +974,35 @@ class BandSessionMachineTest {
     }
 
     @Test
+    fun incompatibleCapabilityValidationPreservesCategory() {
+        val recorder = BandDiagnosticsRecorder()
+        val (session, generation, connectionToken) =
+            negotiatingSessionWithToken(recorder)
+        val unsupported = VirtualBandFixtures.capabilities.copy(
+            schemaVersion = BandCapabilityReport.SUPPORTED_SCHEMA_VERSION + 1,
+        )
+
+        val rejected = assertFailsWith<BandException> {
+            session.acceptCapabilities(
+                unsupported,
+                connectionToken,
+                generation,
+            )
+        }
+
+        assertEquals(BandFailureCategory.INCOMPATIBLE, rejected.category)
+        assertEquals(BandSessionState.INCOMPATIBLE, session.snapshot().state)
+        assertEquals(
+            BandDiagnosticEvent(
+                BandDiagnosticKind.CAPABILITY,
+                BandDiagnosticOutcome.REJECTED,
+                failureCategory = BandFailureCategory.INCOMPATIBLE,
+            ),
+            recorder.snapshot().last(),
+        )
+    }
+
+    @Test
     fun repeatedSetElementsCountTowardTheTraversalBound() {
         val report = VirtualBandFixtures.capabilities.copy(
             capabilities = RepeatingIteratorSet(
@@ -2855,12 +2884,14 @@ class BandSessionMachineTest {
             readyRecorder.snapshot().last(),
         )
 
+        val liveRecorder = BandDiagnosticsRecorder()
         val (
             liveFailureSession,
             liveGeneration,
             liveConnectionToken,
-        ) = readySessionWithToken()
+        ) = readySessionWithToken(liveRecorder)
         liveFailureSession.beginLive()
+        val liveFailureEventCount = liveRecorder.snapshot().size
         liveFailureSession.failEstablishedSession(
             BandFailureCategory.SECURITY_FAILURE,
             liveConnectionToken,
@@ -2870,6 +2901,21 @@ class BandSessionMachineTest {
         assertEquals(BandSessionState.SECURITY_FAILURE, secured.state)
         assertEquals(liveGeneration + 1, secured.generation)
         assertFalse(secured.liveActive)
+        assertEquals(
+            listOf(
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.LIVE,
+                    BandDiagnosticOutcome.INTERRUPTED,
+                    failureCategory = BandFailureCategory.SECURITY_FAILURE,
+                ),
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.AUTHENTICATION,
+                    BandDiagnosticOutcome.REJECTED,
+                    failureCategory = BandFailureCategory.SECURITY_FAILURE,
+                ),
+            ),
+            liveRecorder.snapshot().drop(liveFailureEventCount),
+        )
 
         val (
             invalidFailureSession,
