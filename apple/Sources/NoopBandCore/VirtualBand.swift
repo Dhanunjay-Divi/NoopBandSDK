@@ -262,6 +262,7 @@ public enum BandConformanceRunner {
         "single_command_queue",
         "stale_callback_rejected",
         "scan_callback_session_bound",
+        "scan_callback_consumed_after_selection",
         "cross_session_credentials_rejected",
         "same_session_replay_rejected",
         "stale_terminal_callbacks_rejected",
@@ -311,6 +312,8 @@ public enum BandConformanceRunner {
             return try await staleCallbackRejected()
         case "scan_callback_session_bound":
             return try await scanCallbackSessionBound()
+        case "scan_callback_consumed_after_selection":
+            return try await scanCallbackConsumedAfterSelection()
         case "cross_session_credentials_rejected":
             return try await crossSessionCredentialsRejected()
         case "same_session_replay_rejected":
@@ -628,6 +631,82 @@ public enum BandConformanceRunner {
             scenario: "scan_callback_session_bound",
             events: events,
             snapshot: await currentSession.snapshot(),
+            failure: failure
+        )
+    }
+
+    private static func scanCallbackConsumedAfterSelection()
+        async throws -> BandConformanceResult
+    {
+        let session = BandSessionMachine()
+        let scanToken = try await session.beginScan()
+        var events = ["scan_started"]
+        var failure: BandFailureCategory?
+
+        let connectionToken = try await session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            callbackGeneration: scanToken
+        )
+        events.append("candidate_selected")
+
+        do {
+            _ = try await session.selectCandidate(
+                VirtualBandFixtures.candidate,
+                callbackGeneration: scanToken
+            )
+        } catch let error as BandFailureCategory {
+            guard error == .staleCallback else {
+                throw BandFailureCategory.internalFailure
+            }
+            failure = error
+            events.append("late_select_rejected")
+        }
+        do {
+            try await session.cancelScan(callbackGeneration: scanToken)
+        } catch let error as BandFailureCategory {
+            guard error == .staleCallback else {
+                throw BandFailureCategory.internalFailure
+            }
+            failure = error
+            events.append("late_cancel_rejected")
+        }
+        do {
+            try await session.failScan(
+                .timeout,
+                callbackGeneration: scanToken
+            )
+        } catch let error as BandFailureCategory {
+            guard error == .staleCallback else {
+                throw BandFailureCategory.internalFailure
+            }
+            failure = error
+            events.append("late_failure_rejected")
+        }
+
+        let preserved = await session.snapshot()
+        guard preserved.state == .candidateSelected,
+              preserved.generation == scanToken.generation
+        else {
+            throw BandFailureCategory.internalFailure
+        }
+        events.append("connection_preserved")
+
+        try await session.completeConnectionForConformance(
+            VirtualBandFixtures.identity,
+            token: connectionToken,
+            callbackGeneration: scanToken.generation
+        )
+        try await session.acceptCapabilities(
+            VirtualBandFixtures.capabilities,
+            token: connectionToken,
+            callbackGeneration: scanToken.generation
+        )
+        events.append("current_session_ready")
+
+        return result(
+            scenario: "scan_callback_consumed_after_selection",
+            events: events,
+            snapshot: await session.snapshot(),
             failure: failure
         )
     }

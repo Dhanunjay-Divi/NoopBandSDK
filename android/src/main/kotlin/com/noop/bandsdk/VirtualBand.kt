@@ -214,6 +214,7 @@ object BandConformanceRunner {
         "single_command_queue",
         "stale_callback_rejected",
         "scan_callback_session_bound",
+        "scan_callback_consumed_after_selection",
         "cross_session_credentials_rejected",
         "same_session_replay_rejected",
         "stale_terminal_callbacks_rejected",
@@ -258,6 +259,8 @@ object BandConformanceRunner {
         "single_command_queue" -> singleCommandQueue()
         "stale_callback_rejected" -> staleCallbackRejected()
         "scan_callback_session_bound" -> scanCallbackSessionBound()
+        "scan_callback_consumed_after_selection" ->
+            scanCallbackConsumedAfterSelection()
         "cross_session_credentials_rejected" ->
             crossSessionCredentialsRejected()
         "same_session_replay_rejected" ->
@@ -517,6 +520,77 @@ object BandConformanceRunner {
             "scan_callback_session_bound",
             events,
             currentSession.snapshot(),
+            failure = failure,
+        )
+    }
+
+    private fun scanCallbackConsumedAfterSelection(): BandConformanceResult {
+        val session = BandSessionMachine()
+        val scanToken = session.beginScan()
+        val events = mutableListOf("scan_started")
+        var failure: BandFailureCategory? = null
+
+        val connectionToken = session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            scanToken,
+        )
+        events += "candidate_selected"
+
+        try {
+            session.selectCandidate(
+                VirtualBandFixtures.candidate,
+                scanToken,
+            )
+        } catch (error: BandException) {
+            if (error.category != BandFailureCategory.STALE_CALLBACK) {
+                fail(BandFailureCategory.INTERNAL_FAILURE)
+            }
+            failure = error.category
+            events += "late_select_rejected"
+        }
+        try {
+            session.cancelScan(scanToken)
+        } catch (error: BandException) {
+            if (error.category != BandFailureCategory.STALE_CALLBACK) {
+                fail(BandFailureCategory.INTERNAL_FAILURE)
+            }
+            failure = error.category
+            events += "late_cancel_rejected"
+        }
+        try {
+            session.failScan(
+                BandFailureCategory.TIMEOUT,
+                scanToken,
+            )
+        } catch (error: BandException) {
+            if (error.category != BandFailureCategory.STALE_CALLBACK) {
+                fail(BandFailureCategory.INTERNAL_FAILURE)
+            }
+            failure = error.category
+            events += "late_failure_rejected"
+        }
+
+        val preserved = session.snapshot()
+        check(preserved.state == BandSessionState.CANDIDATE_SELECTED)
+        check(preserved.generation == scanToken.generation)
+        events += "connection_preserved"
+
+        session.completeConnectionForConformance(
+            VirtualBandFixtures.identity,
+            connectionToken,
+            scanToken.generation,
+        )
+        session.acceptCapabilities(
+            VirtualBandFixtures.capabilities,
+            connectionToken,
+            scanToken.generation,
+        )
+        events += "current_session_ready"
+
+        return result(
+            "scan_callback_consumed_after_selection",
+            events,
+            session.snapshot(),
             failure = failure,
         )
     }
