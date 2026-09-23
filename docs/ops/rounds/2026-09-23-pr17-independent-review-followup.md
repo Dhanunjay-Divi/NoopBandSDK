@@ -42,6 +42,10 @@ operation disconnect is bound to its issuing session and cannot be replayed.
 - Kotlin firmware disconnect now also appends `firmware/interrupted` and
   `reconnect/interrupted` through one synchronized recorder batch. This keeps
   the pair adjacent when one recorder is shared by concurrent sessions.
+- Kotlin marks supplier-owned collection traversal active before invoking
+  `size`, `iterator`, or `next`. A nested capability, live-start, live-batch,
+  or history-chunk traversal is rejected before it can recurse, while the
+  existing lifecycle fence still catches ordinary state-changing reentrancy.
 - Both platforms directly reject operation-derived reconnect credentials from
   another equal-generation session and reject replay after successful resume.
 
@@ -76,6 +80,10 @@ supplier exception, payload, sample, or health value is recorded.
 - Hosted PR `#26` review identified one valid Kotlin diagnostic-atomicity
   finding. The focused firmware-disconnect regression passed after the batch
   correction, then the complete Kotlin/JVM suite and `installDist` succeeded.
+- Review of the next exact head identified a second valid Kotlin same-call
+  traversal finding. Three focused reentrancy selections passed after the
+  active-traversal guard; the complete Kotlin/JVM suite then passed 85/85 and
+  `installDist` succeeded.
 - Shared conformance: all 46 ordered Swift/Kotlin scenarios matched the
   checked-in contract.
 - Repository policy: 63 files passed language, binary, JSON, schema, and
@@ -91,9 +99,9 @@ supplier exception, payload, sample, or health value is recorded.
   `/tmp/noop-band-sdk-pr17-independent-review-followup-20260923`.
 - Swift and Kotlin compiler walls ran sequentially. Observed free disk
   remained approximately 13.4 GiB and never crossed the 10 GiB stop floor.
-- Hosted review completed on `830f9fe1`; no hosted workflow, supplier runtime,
-  protected merge, source export, application repin, or physical-device result
-  is claimed yet.
+- Hosted review completed on `830f9fe1` and `ead71b32`; no hosted workflow,
+  supplier runtime, protected merge, source export, application repin, or
+  physical-device result is claimed yet.
 
 ## External gates
 

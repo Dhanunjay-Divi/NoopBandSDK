@@ -291,6 +291,14 @@ possession proof, firmware flashing, or OTA behavior.
     batch; its focused regression, complete Kotlin/JVM suite, `installDist`,
     all 46 shared conformance scenarios, the 63-file repository gate, JSON
     parsing, and diff hygiene pass;
+  - review of exact head `ead71b32` identified one additional valid P2:
+    same-thread traversal could recursively invoke the same snapshot API before
+    its post-traversal fence existed;
+  - the local correction marks traversal active before calling supplier-owned
+    collection code and rejects nested capability, live-start, live-batch, or
+    history traversal; three focused selections pass, the complete Kotlin/JVM
+    suite passes 85/85 with `installDist`, and all 46 shared conformance
+    scenarios plus the 63-file repository gate remain green;
   - no hosted workflow, supplier runtime, protected merge, export, application
     repin, or physical-device result is claimed yet.
 

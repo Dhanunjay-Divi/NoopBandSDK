@@ -1009,6 +1009,108 @@ class BandSessionMachineTest {
     }
 
     @Test
+    fun callerOwnedSnapshotsRejectSameCallReentrancy() {
+        run {
+            val (session, _) = readySession()
+            lateinit var requested: Set<BandStreamKind>
+            requested = ReentrantTraversalSet(
+                setOf(BandStreamKind.HEART_RATE),
+            ) {
+                session.beginLive(requested)
+            }
+
+            val error = assertFailsWith<BandException> {
+                session.beginLive(requested)
+            }
+
+            assertEquals(BandFailureCategory.INVALID_INPUT, error.category)
+            assertEquals(BandSessionState.READY, session.snapshot().state)
+        }
+
+        run {
+            val (session, generation, connectionToken) =
+                negotiatingSessionWithToken()
+            lateinit var report: BandCapabilityReport
+            report = VirtualBandFixtures.capabilities.copy(
+                capabilities = ReentrantTraversalSet(
+                    VirtualBandFixtures.capabilities.capabilities,
+                ) {
+                    session.acceptCapabilities(
+                        report,
+                        connectionToken,
+                        generation,
+                    )
+                },
+            )
+
+            val error = assertFailsWith<BandException> {
+                session.acceptCapabilities(
+                    report,
+                    connectionToken,
+                    generation,
+                )
+            }
+
+            assertEquals(BandFailureCategory.INVALID_INPUT, error.category)
+            assertEquals(
+                BandSessionState.INCOMPATIBLE,
+                session.snapshot().state,
+            )
+        }
+
+        run {
+            val (session, generation) = readySession()
+            val liveToken = session.beginLive()
+            lateinit var batch: BandSampleBatch
+            batch = VirtualBandFixtures.liveBatch.copy(
+                samples = ReentrantTraversalList(
+                    VirtualBandFixtures.liveBatch.samples,
+                ) {
+                    session.stageLiveBatch(batch, liveToken, generation)
+                },
+            )
+
+            val error = assertFailsWith<BandException> {
+                session.stageLiveBatch(batch, liveToken, generation)
+            }
+
+            assertEquals(BandFailureCategory.INVALID_INPUT, error.category)
+            assertEquals(
+                BandSessionState.LIVE_COLLECTING,
+                session.snapshot().state,
+            )
+        }
+
+        run {
+            val (session, generation) = readySession()
+            val operation =
+                session.beginOperation(BandOperationClass.HISTORY)
+            lateinit var chunk: BandHistoryChunk
+            chunk = VirtualBandFixtures.historyChunk.copy(
+                batches = ReentrantTraversalList(
+                    VirtualBandFixtures.historyChunk.batches,
+                ) {
+                    session.stageHistoryChunk(
+                        chunk,
+                        operation,
+                        generation,
+                    )
+                },
+            )
+
+            val error = assertFailsWith<BandException> {
+                session.stageHistoryChunk(chunk, operation, generation)
+            }
+
+            assertEquals(BandFailureCategory.INVALID_INPUT, error.category)
+            assertEquals(
+                BandOperationClass.HISTORY,
+                session.snapshot().activeOperation,
+            )
+        }
+    }
+
+    @Test
     fun otherCallerOwnedSnapshotsRevalidateAfterSameThreadReentrancy() {
         fun assertStale(block: () -> Unit) {
             val error = assertFailsWith<BandException>(block = block)

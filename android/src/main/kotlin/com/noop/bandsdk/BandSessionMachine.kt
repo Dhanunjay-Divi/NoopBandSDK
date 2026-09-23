@@ -62,6 +62,7 @@ class BandSessionMachine(
     private var capabilityReport: BandCapabilityReport? = null
     private var pendingLive: PendingLive? = null
     private var pendingHistory: PendingHistory? = null
+    private var callerTraversalActive = false
     private var lastDurableHistoryComplete: Boolean? = null
     private var historyOperationReceivedDurableReceipt = false
     private var historyOperationLastReceiptComplete: Boolean? = null
@@ -477,6 +478,7 @@ class BandSessionMachine(
         token: BandConnectionToken,
         callbackGeneration: Long,
     ) {
+        rejectCallerTraversalReentry(BandDiagnosticKind.CAPABILITY)
         ensureNotClosed()
         validateConnectionToken(
             token,
@@ -485,7 +487,9 @@ class BandSessionMachine(
         )
         val traversalFence = captureCallerTraversalFence()
         val immutableReport = try {
-            report.immutableSnapshot()
+            snapshotCallerOwned {
+                report.immutableSnapshot()
+            }
         } catch (_: BandException) {
             validateCallerTraversalFence(
                 traversalFence,
@@ -702,6 +706,7 @@ class BandSessionMachine(
     fun beginLive(
         requestedStreams: Set<BandStreamKind>? = null,
     ): BandLiveToken {
+        rejectCallerTraversalReentry(BandDiagnosticKind.LIVE)
         try {
             ensureReadyForOperation()
         } catch (error: BandException) {
@@ -727,8 +732,11 @@ class BandSessionMachine(
         val traversalFence = captureCallerTraversalFence()
         val negotiatedStreams = capabilityReport?.liveStreams.orEmpty()
         val selectedStreams = try {
-            requestedStreams?.boundedSnapshot(BandStreamKind.entries.size)
-                ?: negotiatedStreams
+            requestedStreams?.let { streams ->
+                snapshotCallerOwned {
+                    streams.boundedSnapshot(BandStreamKind.entries.size)
+                }
+            } ?: negotiatedStreams
         } catch (_: BandException) {
             validateCallerTraversalFence(
                 traversalFence,
@@ -839,6 +847,7 @@ class BandSessionMachine(
         token: BandLiveToken,
         callbackGeneration: Long,
     ): LiveAcceptance {
+        rejectCallerTraversalReentry(BandDiagnosticKind.LIVE)
         validateCallbackGeneration(
             callbackGeneration,
             BandDiagnosticKind.LIVE,
@@ -879,8 +888,10 @@ class BandSessionMachine(
         }
         val traversalFence = captureCallerTraversalFence()
         val immutableBatch = try {
-            batch.immutableSnapshot().also {
-                it.validate(BandProvenanceLane.LIVE)
+            snapshotCallerOwned {
+                batch.immutableSnapshot().also {
+                    it.validate(BandProvenanceLane.LIVE)
+                }
             }
         } catch (error: BandException) {
             validateCallerTraversalFence(
@@ -1126,6 +1137,7 @@ class BandSessionMachine(
         token: BandOperationToken,
         callbackGeneration: Long,
     ): HistoryAcceptance {
+        rejectCallerTraversalReentry(BandDiagnosticKind.HISTORY)
         validateCallbackGeneration(
             callbackGeneration,
             BandDiagnosticKind.HISTORY,
@@ -1164,7 +1176,9 @@ class BandSessionMachine(
         }
         val traversalFence = captureCallerTraversalFence()
         val immutableChunk = try {
-            chunk.immutableSnapshot().also(BandHistoryChunk::validate)
+            snapshotCallerOwned {
+                chunk.immutableSnapshot().also(BandHistoryChunk::validate)
+            }
         } catch (error: BandException) {
             validateCallerTraversalFence(
                 traversalFence,
@@ -2027,6 +2041,33 @@ class BandSessionMachine(
     private fun ensureNotClosed() {
         if (state == BandSessionState.CLOSED) {
             fail(BandFailureCategory.CLOSED)
+        }
+    }
+
+    private fun rejectCallerTraversalReentry(
+        diagnosticKind: BandDiagnosticKind,
+    ) {
+        if (callerTraversalActive) {
+            diagnostics.record(
+                BandDiagnosticEvent(
+                    diagnosticKind,
+                    BandDiagnosticOutcome.REJECTED,
+                    failureCategory = BandFailureCategory.INVALID_INPUT,
+                ),
+            )
+            fail(BandFailureCategory.INVALID_INPUT)
+        }
+    }
+
+    private inline fun <T> snapshotCallerOwned(block: () -> T): T {
+        if (callerTraversalActive) {
+            fail(BandFailureCategory.INVALID_INPUT)
+        }
+        callerTraversalActive = true
+        return try {
+            block()
+        } finally {
+            callerTraversalActive = false
         }
     }
 
