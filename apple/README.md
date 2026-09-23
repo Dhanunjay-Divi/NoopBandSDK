@@ -15,6 +15,13 @@ Implemented neutral-core gates:
 - session-token-bound discovery plus generation- and credential-fenced
   connection/authentication, capability, data, receipt, and reconnect
   callbacks;
+- established non-firmware reconnect interruption authorized by the active
+  connection token and resume authorized by the newly issued opaque reconnect
+  token;
+- disconnected non-firmware operations return resumable reconnect authority,
+  while connection, capability, and firmware recovery paths require a fresh
+  scan;
+- ordered live/reconnect interruption diagnostics before live state is cleared;
 - live/history separation and deterministic deduplication;
 - durable app-store receipt before historical checkpoint advance;
 - explicit operation cancellation and categorized failure terminals;

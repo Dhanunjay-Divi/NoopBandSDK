@@ -4,6 +4,8 @@ Last updated: **2026-09-23**
 
 ## Current round
 
+- [PR 17 independent-review follow-up](rounds/2026-09-23-pr17-independent-review-followup.md)
+- [PR 17 review remediation](rounds/2026-09-23-pr17-review-remediation.md)
 - [Established-session callback authority](rounds/2026-09-23-established-session-authority.md)
 - [Scan-token consumption parity](rounds/2026-09-23-scan-token-consumption-parity.md)
 - [Kotlin scan-token identity](rounds/2026-09-23-kotlin-scan-token-identity.md)
@@ -11,16 +13,17 @@ Last updated: **2026-09-23**
 
 ## Current boundary
 
-- Integration branch: `codex/sdk-pr25-session-authority-20260923`
+- Integration branch: `codex/sdk-pr17-review-remediation-20260923`
 - GitHub branch protection: absent as of 2026-09-22; PR-only discipline is
   procedural, not enforced by a repository rule
-- Active branch: `codex/sdk-pr25-session-authority-20260923`
-- Start commit: `f20f4ed552328a64a8a598aaac72befa1d481262`
-- Implementation commits:
-  `4fdef89d6047a270e90b6b0434461a7aca2ed10e`,
-  `2281b3665b2cf83f8445f4fdd52b373925bec551`
-- Evidence commit: this documentation-only commit
-- PR merge: pending
+- Active branch: `codex/sdk-pr17-review-remediation-20260923`
+- Start commit: `650c89e45ca2ab28e14e76e447a7026479e42b4e`
+- Reviewed implementation commit:
+  `3831fb63ae336bd88982586fafc608adda6d6280`
+- Last hosted-reviewed implementation commit:
+  `b66ee30ef352c9317191118a7226869d17059465`
+- Final collection-failure remediation: locally verified; commit, push, and
+  exact-head review pending on pull request `#26`
 - Supplier binaries: absent and prohibited
 - WHOOP application transport: unchanged
 - Production supplier adapter: unavailable pending approved artifacts and
@@ -107,6 +110,18 @@ possession proof, firmware flashing, or OTA behavior.
   active correction requires the exact connection/live token on both
   platforms, migrates all call sites, and redacts every Swift persistence
   handoff value from default rendering and reflection.
+- The current local remediation binds reconnect interruption to the active
+  connection credential, makes resume consume an opaque reconnect credential,
+  and returns resumable reconnect authority from disconnected non-firmware
+  operation terminals. Capability and firmware recovery remain scan-only.
+  Both platforms record live interruption before clearing live state. Kotlin
+  bounded-snapshots requested streams and rejects hostile or JVM-null
+  supplier-owned collections as fixed `invalidInput`.
+- The independent-review follow-up revalidates Kotlin state, generation, exact
+  callback authority, and issuance sequences after every monitor-held
+  caller-owned collection snapshot. Swift records firmware and reconnect
+  interruption as one ordered batch and rejects a stale terminal return if a
+  recovery scan advances during the diagnostic suspension.
 
 ## Current evidence
 
@@ -214,8 +229,8 @@ possession proof, firmware flashing, or OTA behavior.
     stale before the original call returns, and proves the valid connection
     token remains usable;
   - corrected exact-diff re-review found no remaining P0-P2 issue;
-  - commit, PR, merge, deterministic export, and application repin remain
-    pending.
+  - SDK PR `#24` subsequently merged at `f20f4ed`; no commit, PR, or merge
+    action for that historical round remains pending.
 - Current established-session authority correction:
   - Swift package passes 69/69 tests;
   - Kotlin/JVM tests and `installDist` pass;
@@ -235,15 +250,74 @@ possession proof, firmware flashing, or OTA behavior.
   - two independently generated source exports from implementation head
     `2281b366` are byte-identical; the candidate manifest SHA-256 is
     `d980188805fc7e1424501c365773e0b65542c163077d481fa266b91925d563ac`;
-  - publication commit, PR, merge, deterministic exports, and application
-    repin remain pending.
+  - SDK PR `#25` subsequently merged at `650c89e` after evidence commit
+    `e016c3c`; its publication commit, pull request, and merge are complete.
+- Current PR 17 review remediation:
+  - focused Swift reconnect/recovery selection passes 4/4;
+  - focused Kotlin reconnect/recovery/hostile-input selection passes all six
+    selected tests;
+  - complete Swift passes 73/73 with one build worker;
+  - complete Kotlin/JVM passes 81/81 with one Gradle worker and `installDist`
+    succeeds;
+  - shared conformance passes all 46 ordered scenarios;
+  - repository policy passes 62 files;
+  - JSON validation, canonical scenario order, bounded added-line credential
+    review, and `git diff --check` pass;
+  - verbose commands used private capped logs under
+    `/tmp/noop-band-sdk-pr17-review-remediation-20260923`;
+  - full Swift and Gradle walls were delayed until unrelated Xcode walls
+    exited, so no heavy compiler walls overlapped;
+  - independent review of `3831fb63` found three valid follow-up issues in
+    Kotlin traversal reentrancy, Swift firmware diagnostic suspension, and
+    stale PR `#24`/`#25` operations text;
+  - follow-up verification is recorded in the current independent-review
+    round;
+  - no hosted workflow result is claimed.
+- Current PR 17 independent-review follow-up:
+  - focused Swift regressions pass 2/2;
+  - focused Kotlin regressions pass 3/3;
+  - complete Swift passes 75/75 with one build worker;
+  - complete Kotlin/JVM passes 86/86 with one Gradle worker and
+    `installDist` succeeds;
+  - shared conformance passes all 46 ordered scenarios;
+  - repository policy passes 63 files;
+  - JSON parsing, bounded credential review, and diff hygiene pass;
+  - compiler walls ran sequentially and free disk remained above the 10 GiB
+    stop floor;
+  - bounded logs are under
+    `/tmp/noop-band-sdk-pr17-independent-review-followup-20260923`;
+  - SDK PR `#26` review completed on `830f9fe1` and identified one valid P2:
+    Kotlin firmware disconnect emitted the firmware and reconnect interruption
+    through separate recorder calls;
+  - the local correction emits both events through one synchronized recorder
+    batch; its focused regression, complete Kotlin/JVM suite, `installDist`,
+    all 46 shared conformance scenarios, the 63-file repository gate, JSON
+    parsing, and diff hygiene pass;
+  - review of exact head `ead71b32` identified one additional valid P2:
+    same-thread traversal could recursively invoke the same snapshot API before
+    its post-traversal fence existed;
+  - the local correction marks traversal active before calling supplier-owned
+    collection code and rejects nested capability, live-start, live-batch, or
+    history traversal; three focused selections pass, the complete Kotlin/JVM
+    suite passes 85/85 with `installDist`, and all 46 shared conformance
+    scenarios plus the 63-file repository gate remain green;
+  - exact-head review of `b66ee30e` found two stale operations statements and
+    one valid collection-failure defect: a supplier-owned Kotlin list or set
+    could throw `BandException` and select the propagated failure category;
+  - list and set size/iterator access now normalize both `BandException` and
+    runtime failures to fixed `invalidInput`. The direct regression passes,
+    the complete Kotlin/JVM suite passes 86/86 with `installDist`, all 46
+    shared conformance scenarios match, and the 63-file repository gate plus
+    diff hygiene pass;
+  - no hosted workflow, supplier runtime, protected merge, export, application
+    repin, or physical-device result is claimed yet.
 
 ## Next ordered actions
 
-1. Commit and push once, then merge the SDK correction normally. Do not claim
-   hosted checks: this repository intentionally has no hosted workflow.
-2. Produce two byte-identical clean source exports from the exact merge.
-3. Repin NOOP application PR `#17`, compile exported support as a separate
-   test target, rerun local artifact/app gates, push once, and require final
-   protected hosted checks and review.
+1. Commit and push the verified collection-failure correction and current
+   evidence to PR `#26`.
+2. Resolve the three matching review threads, require exact-head review, and
+   merge normally only if it is clean.
+3. Export the merged SDK revision twice, verify byte identity, and repin the
+   application candidate.
 4. Keep supplier and physical-device gates explicit and separate.
