@@ -889,8 +889,6 @@ class BandSessionMachineTest {
                     samples = listOf(duplicate, fresh),
                 ),
                 sourceBatch.copy(
-                    parserRevision = "parser-v2",
-                    calibrationRevision = "calibration-v2",
                     samples = listOf(fresh, secondFresh),
                 ),
             ),
@@ -914,10 +912,17 @@ class BandSessionMachineTest {
             sourceBatch.calibrationRevision,
             acceptance.acceptedSamples[0].calibrationRevision,
         )
-        assertEquals("parser-v2", acceptance.acceptedSamples[1].parserRevision)
         assertEquals(
-            "calibration-v2",
+            sourceBatch.parserRevision,
+            acceptance.acceptedSamples[1].parserRevision,
+        )
+        assertEquals(
+            sourceBatch.calibrationRevision,
             acceptance.acceptedSamples[1].calibrationRevision,
+        )
+        assertEquals(
+            VirtualBandFixtures.capabilities.reportRevision,
+            acceptance.acceptedSamples[1].capabilityReportRevision,
         )
         assertEquals(2, acceptance.duplicateSamples)
         assertEquals(2, store.commit(acceptance).committedSamples)
@@ -1303,6 +1308,245 @@ class BandSessionMachineTest {
                 durableSampleIdentities = nullElementSet(),
             ).immutableSnapshot()
         }
+
+        assertInvalidInput {
+            VirtualBandFixtures.capabilities.copy(
+                capabilities = JavaNullCollections.set(),
+            ).immutableSnapshot()
+        }
+        assertInvalidInput {
+            VirtualBandFixtures.capabilities.copy(
+                streamSemantics = JavaNullCollections.list(),
+            ).immutableSnapshot()
+        }
+        assertInvalidInput {
+            VirtualBandFixtures.liveBatch.copy(
+                samples = JavaNullCollections.list(),
+            ).immutableSnapshot()
+        }
+        assertInvalidInput {
+            VirtualBandFixtures.historyChunk.copy(
+                batches = JavaNullCollections.list(),
+            ).immutableSnapshot()
+        }
+        assertInvalidInput {
+            BandHistoryCheckpoint(
+                sourceIdentity = VirtualBandFixtures.identity.sourceIdentity,
+                acknowledgedCursor = null,
+                lastHistoryComplete = null,
+                durableSampleIdentities = JavaNullCollections.set(),
+            ).immutableSnapshot()
+        }
+    }
+
+    @Test
+    fun liveOperationsFollowNegotiatedConcurrency() {
+        val recorder = BandDiagnosticsRecorder()
+        val report = VirtualBandFixtures.capabilities.copy(
+            operationsAllowedDuringLive = setOf(BandOperationClass.BATTERY),
+        )
+        val (session, _) = readySessionWithCapabilities(report, recorder)
+        val liveToken = session.beginLive()
+
+        val battery = session.beginOperation(BandOperationClass.BATTERY)
+        session.cancelOperation(battery)
+
+        val denied = assertFailsWith<BandException> {
+            session.beginOperation(BandOperationClass.HAPTIC)
+        }
+        assertEquals(BandFailureCategory.BUSY, denied.category)
+        assertEquals(
+            BandDiagnosticEvent(
+                BandDiagnosticKind.COMMAND,
+                BandDiagnosticOutcome.REJECTED,
+                failureCategory = BandFailureCategory.BUSY,
+                operationClass = BandOperationClass.HAPTIC,
+            ),
+            recorder.snapshot().last(),
+        )
+        session.stopLive(liveToken)
+    }
+
+    @Test
+    fun negotiatedStreamSemanticsRejectRevisionDriftBeforeStaging() {
+        val recorder = BandDiagnosticsRecorder()
+        val (session, generation) = readySession(recorder)
+        val liveToken = session.beginLive()
+
+        listOf(
+            VirtualBandFixtures.liveBatch.copy(
+                parserRevision = "parser-v2",
+            ),
+            VirtualBandFixtures.liveBatch.copy(
+                calibrationRevision = "calibration-v2",
+            ),
+        ).forEach { mismatched ->
+            val error = assertFailsWith<BandException> {
+                session.stageLiveBatch(mismatched, liveToken, generation)
+            }
+            assertEquals(BandFailureCategory.UNSUPPORTED, error.category)
+            assertEquals(
+                BandSessionState.LIVE_COLLECTING,
+                session.snapshot().state,
+            )
+        }
+        session.stopLive(liveToken)
+
+        val historyToken =
+            session.beginOperation(BandOperationClass.HISTORY)
+        val historyError = assertFailsWith<BandException> {
+            session.stageHistoryChunk(
+                VirtualBandFixtures.historyChunk.copy(
+                    batches = listOf(
+                        VirtualBandFixtures.historyChunk.batches.first().copy(
+                            calibrationRevision = "calibration-v2",
+                        ),
+                    ),
+                ),
+                historyToken,
+                generation,
+            )
+        }
+        assertEquals(BandFailureCategory.UNSUPPORTED, historyError.category)
+        assertEquals(
+            BandOperationClass.HISTORY,
+            session.snapshot().activeOperation,
+        )
+        session.cancelOperation(historyToken)
+    }
+
+    @Test
+    fun liveStagingPrecedesDurableCompletionAndReportsZeroDuplicates() {
+        val recorder = BandDiagnosticsRecorder()
+        val (session, generation) = readySession(recorder)
+        val liveToken = session.beginLive()
+        val first = session.stageLiveBatch(
+            VirtualBandFixtures.liveBatch,
+            liveToken,
+            generation,
+        )
+
+        var liveEvents = recorder.snapshot().filter {
+            it.kind == BandDiagnosticKind.LIVE
+        }
+        assertTrue(
+            BandDiagnosticEvent(
+                BandDiagnosticKind.LIVE,
+                BandDiagnosticOutcome.STAGED,
+                countBucket = BandCountBucket.ONE,
+            ) in liveEvents,
+        )
+        assertFalse(
+            liveEvents.any {
+                it.outcome == BandDiagnosticOutcome.COMPLETED
+            },
+        )
+        session.acknowledgeLive(
+            DurableLiveReceipt(
+                acceptance = first,
+                committedSamples = 1,
+                committed = true,
+            ),
+            generation,
+        )
+
+        val duplicate = session.stageLiveBatch(
+            VirtualBandFixtures.liveBatch,
+            liveToken,
+            generation,
+        )
+        assertEquals(0, duplicate.acceptedSamples.size)
+        liveEvents = recorder.snapshot().filter {
+            it.kind == BandDiagnosticKind.LIVE
+        }
+        assertEquals(
+            listOf(
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.LIVE,
+                    BandDiagnosticOutcome.BEGAN,
+                ),
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.LIVE,
+                    BandDiagnosticOutcome.STAGED,
+                    BandCountBucket.ONE,
+                ),
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.LIVE,
+                    BandDiagnosticOutcome.COMPLETED,
+                    BandCountBucket.ONE,
+                ),
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.LIVE,
+                    BandDiagnosticOutcome.STAGED,
+                    BandCountBucket.ZERO,
+                ),
+            ),
+            liveEvents,
+        )
+        assertFalse(
+            BandDiagnosticEvent(
+                BandDiagnosticKind.LIVE,
+                BandDiagnosticOutcome.COMPLETED,
+                BandCountBucket.ZERO,
+            ) in liveEvents,
+        )
+        session.acknowledgeLive(
+            DurableLiveReceipt(
+                acceptance = duplicate,
+                committedSamples = 0,
+                committed = true,
+            ),
+            generation,
+        )
+        liveEvents = recorder.snapshot().filter {
+            it.kind == BandDiagnosticKind.LIVE
+        }
+        assertEquals(
+            BandDiagnosticEvent(
+                BandDiagnosticKind.LIVE,
+                BandDiagnosticOutcome.COMPLETED,
+                BandCountBucket.ZERO,
+            ),
+            liveEvents.last(),
+        )
+        session.stopLive(liveToken)
+    }
+
+    @Test
+    fun disconnectDiagnosticsPreserveEveryReason() {
+        BandDisconnectReason.entries.forEach { reason ->
+            val recorder = BandDiagnosticsRecorder()
+            val (session, generation) = readySession(recorder)
+            val eventCount = recorder.snapshot().size
+
+            session.disconnect(reason, generation)
+
+            assertEquals(
+                listOf(
+                    BandDiagnosticEvent(
+                        BandDiagnosticKind.DISCONNECT,
+                        BandDiagnosticOutcome.BEGAN,
+                        disconnectReason = reason,
+                    ),
+                    BandDiagnosticEvent(
+                        BandDiagnosticKind.DISCONNECT,
+                        BandDiagnosticOutcome.COMPLETED,
+                        disconnectReason = reason,
+                    ),
+                ),
+                recorder.snapshot().drop(eventCount),
+            )
+        }
+    }
+
+    @Test
+    fun legacyJavaDiagnosticConstructorRemainsAvailable() {
+        val event = JavaNullCollections.legacyDiagnosticEvent()
+
+        assertEquals(BandDiagnosticKind.CONNECTION, event.kind)
+        assertEquals(BandDiagnosticOutcome.COMPLETED, event.outcome)
+        assertNull(event.operationClass)
+        assertNull(event.disconnectReason)
     }
 
     @Test
@@ -2273,6 +2517,7 @@ class BandSessionMachineTest {
                     BandDiagnosticKind.COMMAND,
                     BandDiagnosticOutcome.INTERRUPTED,
                     failureCategory = BandFailureCategory.DISCONNECTED,
+                    operationClass = BandOperationClass.BATTERY,
                 ),
                 BandDiagnosticEvent(
                     BandDiagnosticKind.LIVE,
@@ -2311,6 +2556,7 @@ class BandSessionMachineTest {
                     BandDiagnosticKind.COMMAND,
                     BandDiagnosticOutcome.FAILED,
                     failureCategory = BandFailureCategory.DISCONNECTED,
+                    operationClass = BandOperationClass.BATTERY,
                 ),
                 BandDiagnosticEvent(
                     BandDiagnosticKind.LIVE,
@@ -2409,6 +2655,7 @@ class BandSessionMachineTest {
                     BandDiagnosticKind.FIRMWARE,
                     BandDiagnosticOutcome.INTERRUPTED,
                     failureCategory = BandFailureCategory.DISCONNECTED,
+                    operationClass = BandOperationClass.FIRMWARE,
                 ),
                 BandDiagnosticEvent(
                     BandDiagnosticKind.RECONNECT,
@@ -2501,6 +2748,10 @@ class BandSessionMachineTest {
                 historyDays = 0,
                 liveStreams = setOf(BandStreamKind.HEART_RATE),
                 historyStreams = setOf(BandStreamKind.HEART_RATE),
+                streamSemantics =
+                    VirtualBandFixtures.capabilities.streamSemantics.filter {
+                        it.stream == BandStreamKind.HEART_RATE
+                    },
             ).validate()
         }
         assertEquals(
@@ -2511,11 +2762,21 @@ class BandSessionMachineTest {
             historyDays = 0,
             liveStreams = setOf(BandStreamKind.HEART_RATE),
             historyStreams = emptySet(),
+            streamSemantics =
+                VirtualBandFixtures.capabilities.streamSemantics.filter {
+                    it.lane == BandProvenanceLane.LIVE &&
+                        it.stream == BandStreamKind.HEART_RATE
+                },
         ).validate()
 
         val historyOnly = VirtualBandFixtures.capabilities.copy(
             liveStreams = emptySet(),
             historyStreams = setOf(BandStreamKind.HEART_RATE),
+            streamSemantics =
+                VirtualBandFixtures.capabilities.streamSemantics.filter {
+                    it.lane == BandProvenanceLane.HISTORY &&
+                        it.stream == BandStreamKind.HEART_RATE
+                },
         )
         val (historySession, historyGeneration) =
             readySessionWithCapabilities(historyOnly)
@@ -2546,6 +2807,11 @@ class BandSessionMachineTest {
         val liveOnly = VirtualBandFixtures.capabilities.copy(
             liveStreams = setOf(BandStreamKind.HEART_RATE),
             historyStreams = emptySet(),
+            streamSemantics =
+                VirtualBandFixtures.capabilities.streamSemantics.filter {
+                    it.lane == BandProvenanceLane.LIVE &&
+                        it.stream == BandStreamKind.HEART_RATE
+                },
         )
         val (liveSession, liveGeneration) =
             readySessionWithCapabilities(liveOnly)
@@ -2919,6 +3185,7 @@ class BandSessionMachineTest {
                     BandDiagnosticKind.COMMAND,
                     BandDiagnosticOutcome.REJECTED,
                     failureCategory = BandFailureCategory.BUSY,
+                    operationClass = BandOperationClass.BATTERY,
                 ),
             ),
         )
@@ -3521,6 +3788,10 @@ class BandSessionMachineTest {
     fun closeCancelsOnlyActualActiveLifecycleAndOperationPhases() {
         fun assertCloseAdds(
             expectedKinds: List<BandDiagnosticKind>,
+            operationClasses: Map<
+                BandDiagnosticKind,
+                BandOperationClass
+                > = emptyMap(),
             prepare: (BandDiagnosticsRecorder) -> BandSessionMachine,
         ) {
             val recorder = BandDiagnosticsRecorder()
@@ -3535,6 +3806,7 @@ class BandSessionMachineTest {
                     BandDiagnosticEvent(
                         it,
                         BandDiagnosticOutcome.CANCELLED,
+                        operationClass = operationClasses[it],
                     )
                 },
                 recorder.snapshot().drop(before.size),
@@ -3588,13 +3860,22 @@ class BandSessionMachineTest {
             BandOperationClass.BATTERY to BandDiagnosticKind.COMMAND,
             BandOperationClass.HISTORY to BandDiagnosticKind.HISTORY,
         ).forEach { (operationClass, diagnosticKind) ->
-            assertCloseAdds(listOf(diagnosticKind)) { recorder ->
+            assertCloseAdds(
+                listOf(diagnosticKind),
+                mapOf(diagnosticKind to operationClass),
+            ) { recorder ->
                 readySession(recorder).first.also {
                     it.beginOperation(operationClass)
                 }
             }
         }
-        assertCloseAdds(listOf(BandDiagnosticKind.FIRMWARE)) { recorder ->
+        assertCloseAdds(
+            listOf(BandDiagnosticKind.FIRMWARE),
+            mapOf(
+                BandDiagnosticKind.FIRMWARE to
+                    BandOperationClass.FIRMWARE,
+            ),
+        ) { recorder ->
             readySessionWithCapabilities(
                 VirtualBandFixtures.capabilities.copy(
                     capabilities =
@@ -3608,6 +3889,10 @@ class BandSessionMachineTest {
         }
         assertCloseAdds(
             listOf(BandDiagnosticKind.COMMAND, BandDiagnosticKind.LIVE),
+            mapOf(
+                BandDiagnosticKind.COMMAND to
+                    BandOperationClass.BATTERY,
+            ),
         ) { recorder ->
             readySession(recorder).first.also {
                 it.beginLive()

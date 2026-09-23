@@ -23,7 +23,9 @@ NOOP mobile storage and product adapters
 - One supported phone is the active BLE collector.
 - Mac and additional devices are viewers through explicit NOOP+ sync.
 - Device operations are serialized through one queue.
-- Capabilities are negotiated; unsupported data remains missing.
+- Capability schema 3 negotiates exact stream semantics, provenance revisions,
+  and operation classes that may coexist with live collection.
+- Unsupported or semantically mismatched data remains missing.
 - The SDK does not score health metrics or make medical claims.
 - Screens, analytics, storage, and cloud code never depend on supplier types.
 
@@ -56,8 +58,10 @@ operation returns resume authority; recovery from connection, capability, and
 firmware failures clears negotiation and requires a fresh scan. Kotlin
 snapshots hostile caller-owned collections under fixed limits and rejects JVM
 null elements as `invalidInput`. Firmware uses a dedicated diagnostic family,
-and the recent identity cache remains bounded. It does not contain or validate
-a supplier transport.
+and the recent identity cache remains bounded. Live acceptance records bounded
+staged evidence before persistence, then records durable completion without
+reordering the pending lifecycle. It does not contain or validate a supplier
+transport.
 
 The owner-supplied HBand/Veepoo package was statically assessed on 2026-09-12.
 It remains a candidate phone transport, not a production-approved SDK. The
