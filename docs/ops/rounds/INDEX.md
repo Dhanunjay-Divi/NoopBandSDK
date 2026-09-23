@@ -1,5 +1,6 @@
 # NOOP Band SDK operations rounds
 
+- [2026-09-23 - PR 17 review remediation](2026-09-23-pr17-review-remediation.md)
 - [2026-09-23 - Established-session callback authority](2026-09-23-established-session-authority.md)
 - [2026-09-23 - Scan-token consumption parity](2026-09-23-scan-token-consumption-parity.md)
 - [2026-09-23 - Kotlin scan-token identity](2026-09-23-kotlin-scan-token-identity.md)

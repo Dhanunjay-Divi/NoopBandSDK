@@ -4,6 +4,7 @@ Last updated: **2026-09-23**
 
 ## Current round
 
+- [PR 17 review remediation](rounds/2026-09-23-pr17-review-remediation.md)
 - [Established-session callback authority](rounds/2026-09-23-established-session-authority.md)
 - [Scan-token consumption parity](rounds/2026-09-23-scan-token-consumption-parity.md)
 - [Kotlin scan-token identity](rounds/2026-09-23-kotlin-scan-token-identity.md)
@@ -11,16 +12,13 @@ Last updated: **2026-09-23**
 
 ## Current boundary
 
-- Integration branch: `codex/sdk-pr25-session-authority-20260923`
+- Integration branch: `codex/sdk-pr17-review-remediation-20260923`
 - GitHub branch protection: absent as of 2026-09-22; PR-only discipline is
   procedural, not enforced by a repository rule
-- Active branch: `codex/sdk-pr25-session-authority-20260923`
-- Start commit: `f20f4ed552328a64a8a598aaac72befa1d481262`
-- Implementation commits:
-  `4fdef89d6047a270e90b6b0434461a7aca2ed10e`,
-  `2281b3665b2cf83f8445f4fdd52b373925bec551`
-- Evidence commit: this documentation-only commit
-- PR merge: pending
+- Active branch: `codex/sdk-pr17-review-remediation-20260923`
+- Start commit: `650c89e45ca2ab28e14e76e447a7026479e42b4e`
+- Implementation commit: this commit
+- Pull request: not requested
 - Supplier binaries: absent and prohibited
 - WHOOP application transport: unchanged
 - Production supplier adapter: unavailable pending approved artifacts and
@@ -107,6 +105,13 @@ possession proof, firmware flashing, or OTA behavior.
   active correction requires the exact connection/live token on both
   platforms, migrates all call sites, and redacts every Swift persistence
   handoff value from default rendering and reflection.
+- The current local remediation binds reconnect interruption to the active
+  connection credential, makes resume consume an opaque reconnect credential,
+  and returns resumable reconnect authority from disconnected non-firmware
+  operation terminals. Capability and firmware recovery remain scan-only.
+  Both platforms record live interruption before clearing live state. Kotlin
+  bounded-snapshots requested streams and rejects hostile or JVM-null
+  supplier-owned collections as fixed `invalidInput`.
 
 ## Current evidence
 
@@ -237,13 +242,27 @@ possession proof, firmware flashing, or OTA behavior.
     `d980188805fc7e1424501c365773e0b65542c163077d481fa266b91925d563ac`;
   - publication commit, PR, merge, deterministic exports, and application
     repin remain pending.
+- Current PR 17 review remediation:
+  - focused Swift reconnect/recovery selection passes 4/4;
+  - focused Kotlin reconnect/recovery/hostile-input selection passes all six
+    selected tests;
+  - complete Swift passes 73/73 with one build worker;
+  - complete Kotlin/JVM passes 81/81 with one Gradle worker and `installDist`
+    succeeds;
+  - shared conformance passes all 46 ordered scenarios;
+  - repository policy passes 62 files;
+  - JSON validation, canonical scenario order, bounded added-line credential
+    review, and `git diff --check` pass;
+  - verbose commands used private capped logs under
+    `/tmp/noop-band-sdk-pr17-review-remediation-20260923`;
+  - full Swift and Gradle walls were delayed until unrelated Xcode walls
+    exited, so no heavy compiler walls overlapped;
+  - no independent review or hosted workflow result is claimed.
 
 ## Next ordered actions
 
-1. Commit and push once, then merge the SDK correction normally. Do not claim
-   hosted checks: this repository intentionally has no hosted workflow.
-2. Produce two byte-identical clean source exports from the exact merge.
-3. Repin NOOP application PR `#17`, compile exported support as a separate
-   test target, rerun local artifact/app gates, push once, and require final
-   protected hosted checks and review.
-4. Keep supplier and physical-device gates explicit and separate.
+1. Keep the verified implementation committed locally and report its exact
+   SHA. Do not push or open a pull request for this task.
+2. Any later PR, merge, source export, or application repin requires a separate
+   explicit request and fresh exact-head verification.
+3. Keep supplier and physical-device gates explicit and separate.

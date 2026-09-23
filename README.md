@@ -49,8 +49,15 @@ and unsupported command classes. Discovery callbacks are bound to the exact
 session token; active operations have explicit cancellation and categorized
 failure terminals. Connection and authentication progress, completion,
 cancellation, and failure are generation-fenced and use bounded diagnostics.
-Firmware uses a dedicated diagnostic family, and the recent identity cache
-remains bounded. It does not contain or validate a supplier transport.
+Reconnect interruption and completion additionally require exact
+session-issued connection and reconnect credentials, and live interruption is
+recorded before reconnect clears live state. A disconnected non-firmware
+operation returns resume authority; recovery from connection, capability, and
+firmware failures clears negotiation and requires a fresh scan. Kotlin
+snapshots hostile caller-owned collections under fixed limits and rejects JVM
+null elements as `invalidInput`. Firmware uses a dedicated diagnostic family,
+and the recent identity cache remains bounded. It does not contain or validate
+a supplier transport.
 
 The owner-supplied HBand/Veepoo package was statically assessed on 2026-09-12.
 It remains a candidate phone transport, not a production-approved SDK. The

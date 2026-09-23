@@ -79,15 +79,34 @@ the exact session object and the generation captured when scanning began.
 Later asynchronous supplier callbacks carry the session generation plus their
 session-bound connection, live, operation, or receipt credential. Connection
 and authentication terminal callbacks also carry their originating bounded
-lifecycle phase. Foreign-session or older-generation discovery,
-connection/authentication, capability, live, history, receipt, and reconnect
-callbacks fail closed without mutating the current session. Diagnostics use the
-originating phase rather than inferring it from a replacement session.
+lifecycle phase. Established non-firmware reconnect interruption requires the
+exact active connection credential and returns a new opaque reconnect
+credential for the advanced generation. Reconnect completion consumes that
+exact credential and returns a replacement connection credential. A reconnect
+that ends live collection records `live/interrupted` before clearing the live
+lease, then records `reconnect/interrupted`. Foreign-session or
+older-generation discovery, connection/authentication, capability, live,
+history, receipt, and reconnect callbacks fail closed without mutating the
+current session. Equal numeric generations never substitute for issued
+credentials. Diagnostics use the originating phase rather than inferring it
+from a replacement session.
+
+A non-firmware operation that fails as disconnected is already authorized by
+its exact active operation credential. Its `failOperation` terminal therefore
+returns the reconnect credential needed to resume the retained identity and
+capability negotiation. Other operation terminals return no reconnect
+credential. Recovery from connection, capability, and firmware failures
+invalidates negotiation state and intentionally requires a fresh `beginScan`;
+those paths cannot be resumed with a generation alone.
 
 All bounded protocol strings use UTF-8 byte length on Apple and Android.
 Sample sequence values use `0 ... Int64.max`, and device time is a non-negative
 signed 64-bit millisecond value. The supplier adapter must reject values outside
-those domains before they reach application storage.
+those domains before they reach application storage. Kotlin snapshots every
+supplier-owned list or set through a bounded traversal before validation.
+Advertised oversize, traversal overflow, collection exceptions, and JVM null
+elements fail as fixed `invalidInput` without retaining the caller-owned
+collection.
 
 ## Health and data boundary
 

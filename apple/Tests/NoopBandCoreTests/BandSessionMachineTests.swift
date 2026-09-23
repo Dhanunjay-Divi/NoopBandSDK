@@ -327,8 +327,18 @@ struct BandSessionMachineTests {
         let acceptedHistorySample = try #require(
             historyAcceptance.acceptedSamples.first
         )
+        let (
+            reconnectSession,
+            reconnectGeneration,
+            reconnectConnectionToken
+        ) = try await readySessionWithToken()
+        let reconnectToken = try await reconnectSession.interruptForReconnect(
+            token: reconnectConnectionToken,
+            callbackGeneration: reconnectGeneration
+        )
 
         expectRedacted(connectionToken, as: "BandConnectionToken")
+        expectRedacted(reconnectToken, as: "BandReconnectToken")
         expectRedacted(liveToken, as: "BandLiveToken")
         expectRedacted(operationToken, as: "BandOperationToken")
         expectRedacted(liveAcceptance, as: "LiveAcceptance")
@@ -350,6 +360,24 @@ struct BandSessionMachineTests {
         #expect(result.events.contains("foreign_live_receipt_rejected"))
         #expect(result.events.contains("foreign_history_receipt_rejected"))
         #expect(result.events.contains("foreign_operation_token_rejected"))
+        #expect(result.finalState == BandSessionState.ready.rawValue)
+    }
+
+    @Test("Reconnect callbacks are bound to issued session credentials")
+    func reconnectCallbacksAreSessionBound() async throws {
+        let result = try await BandConformanceRunner.run(
+            "reconnect_callback_session_bound"
+        )
+        #expect(result.events == [
+            "ready_pair",
+            "foreign_interrupt_rejected",
+            "current_live_preserved",
+            "live_interruption_ordered",
+            "foreign_resume_rejected",
+            "current_recovery_preserved",
+            "own_resume_accepted",
+        ])
+        #expect(result.failure == BandFailureCategory.staleCallback.rawValue)
         #expect(result.finalState == BandSessionState.ready.rawValue)
     }
 
@@ -871,6 +899,9 @@ struct BandSessionMachineTests {
             callbackGeneration: disconnectedGeneration
         )
         #expect(await disconnectedSession.snapshot().state == .recovering)
+        let recoveryScanToken = try await disconnectedSession.beginScan()
+        #expect(recoveryScanToken.generation == disconnectedGeneration + 2)
+        #expect(await disconnectedSession.snapshot().state == .scanning)
     }
 
     @Test("Authentication failure invalidates an active operation session")
@@ -1238,22 +1269,54 @@ struct BandSessionMachineTests {
         #expect(await second.snapshot().state == .rejected)
     }
 
-    @Test("Reconnect issues new established-session authority")
-    func reconnectIssuesNewConnectionToken() async throws {
+    @Test("Reconnect requires session-bound authority and issues a new connection token")
+    func reconnectRequiresSessionBoundTokens() async throws {
         let (session, generation, originalToken) =
             try await readySessionWithToken()
-        let reconnectGeneration = try await session.interruptForReconnect(
+        let (foreignSession, foreignGeneration, foreignConnectionToken) =
+            try await readySessionWithToken()
+        #expect(generation == foreignGeneration)
+
+        await #expect(throws: BandFailureCategory.staleCallback) {
+            _ = try await session.interruptForReconnect(
+                token: foreignConnectionToken,
+                callbackGeneration: generation
+            )
+        }
+        #expect(await session.snapshot().state == .ready)
+
+        let reconnectAuthority = try await session.interruptForReconnect(
+            token: originalToken,
             callbackGeneration: generation
         )
+        let foreignReconnectAuthority =
+            try await foreignSession.interruptForReconnect(
+                token: foreignConnectionToken,
+                callbackGeneration: foreignGeneration
+            )
+        #expect(
+            reconnectAuthority.generation
+                == foreignReconnectAuthority.generation
+        )
+
+        await #expect(throws: BandFailureCategory.staleCallback) {
+            _ = try await session.resumeAfterReconnect(
+                token: foreignReconnectAuthority,
+                callbackGeneration: reconnectAuthority.generation
+            )
+        }
+        #expect(await session.snapshot().state == .recovering)
+
         let reconnectToken = try await session.resumeAfterReconnect(
-            callbackGeneration: reconnectGeneration
+            token: reconnectAuthority,
+            callbackGeneration: reconnectAuthority.generation
         )
 
         await #expect(throws: BandFailureCategory.staleCallback) {
             try await session.failEstablishedSession(
                 .authentication,
                 token: originalToken,
-                callbackGeneration: reconnectGeneration
+                callbackGeneration: reconnectAuthority.generation
             )
         }
         #expect(await session.snapshot().state == .ready)
@@ -1261,25 +1324,148 @@ struct BandSessionMachineTests {
         try await session.failEstablishedSession(
             .authentication,
             token: reconnectToken,
-            callbackGeneration: reconnectGeneration
+            callbackGeneration: reconnectAuthority.generation
         )
         #expect(await session.snapshot().state == .rejected)
+    }
+
+    @Test("Reconnect records live interruption before clearing live state")
+    func reconnectRecordsLiveInterruptionInOrder() async throws {
+        let recorder = BandDiagnosticsRecorder()
+        let (session, generation, connectionToken) =
+            try await readySessionWithToken(diagnostics: recorder)
+        _ = try await session.beginLive()
+        _ = try await session.beginOperation(.battery)
+        let eventCount = await recorder.snapshot().count
+
+        _ = try await session.interruptForReconnect(
+            token: connectionToken,
+            callbackGeneration: generation
+        )
+
+        let interruptionEvents =
+            Array(await recorder.snapshot().dropFirst(eventCount))
+        #expect(interruptionEvents == [
+            BandDiagnosticEvent(
+                kind: .command,
+                outcome: .interrupted,
+                failureCategory: .disconnected
+            ),
+            BandDiagnosticEvent(kind: .live, outcome: .interrupted),
+            BandDiagnosticEvent(kind: .reconnect, outcome: .interrupted),
+        ])
+        let recovering = await session.snapshot()
+        #expect(recovering.state == .recovering)
+        #expect(!recovering.liveActive)
+        #expect(recovering.activeOperation == nil)
+    }
+
+    @Test("Operation disconnect returns resumable reconnect authority")
+    func operationDisconnectReturnsReconnectAuthority() async throws {
+        let recorder = BandDiagnosticsRecorder()
+        let (session, generation, _) =
+            try await readySessionWithToken(diagnostics: recorder)
+        _ = try await session.beginLive()
+        let operation = try await session.beginOperation(.battery)
+        let eventCount = await recorder.snapshot().count
+
+        let authority = try await session.failOperation(
+            operation,
+            category: .disconnected
+        )
+        let reconnectAuthority = try #require(authority)
+
+        #expect(
+            Array(await recorder.snapshot().dropFirst(eventCount)) == [
+                BandDiagnosticEvent(
+                    kind: .command,
+                    outcome: .failed,
+                    failureCategory: .disconnected
+                ),
+                BandDiagnosticEvent(kind: .live, outcome: .interrupted),
+                BandDiagnosticEvent(
+                    kind: .reconnect,
+                    outcome: .interrupted,
+                    failureCategory: .disconnected
+                ),
+            ]
+        )
+        let recovering = await session.snapshot()
+        #expect(recovering.state == .recovering)
+        #expect(recovering.generation == generation + 1)
+        #expect(!recovering.liveActive)
+
+        _ = try await session.resumeAfterReconnect(
+            token: reconnectAuthority,
+            callbackGeneration: reconnectAuthority.generation
+        )
+        #expect(await session.snapshot().state == .ready)
+    }
+
+    @Test("Firmware disconnect requires full rediscovery")
+    func firmwareDisconnectRequiresFullRediscovery() async throws {
+        let recorder = BandDiagnosticsRecorder()
+        let (session, generation, connectionToken) =
+            try await readySessionWithToken(
+                capabilities: firmwareCapabilities,
+                diagnostics: recorder
+            )
+        let operation = try await session.beginOperation(.firmware)
+        await #expect(throws: BandFailureCategory.invalidState) {
+            _ = try await session.interruptForReconnect(
+                token: connectionToken,
+                callbackGeneration: generation
+            )
+        }
+        #expect(await session.snapshot().activeOperation == .firmware)
+        let eventCount = await recorder.snapshot().count
+
+        let reconnectAuthority = try await session.failOperation(
+            operation,
+            category: .disconnected
+        )
+
+        #expect(reconnectAuthority == nil)
+        #expect(
+            Array(await recorder.snapshot().dropFirst(eventCount)) == [
+                BandDiagnosticEvent(
+                    kind: .firmware,
+                    outcome: .interrupted,
+                    failureCategory: .disconnected
+                ),
+                BandDiagnosticEvent(
+                    kind: .reconnect,
+                    outcome: .interrupted,
+                    failureCategory: .disconnected
+                ),
+            ]
+        )
+        let recovering = await session.snapshot()
+        #expect(recovering.state == .recovering)
+        #expect(recovering.generation == generation + 1)
+
+        let recoveryScanToken = try await session.beginScan()
+        #expect(recoveryScanToken.generation == generation + 2)
+        #expect(await session.snapshot().state == .scanning)
     }
 
     @Test("Reconnect token survives live start during diagnostics")
     func reconnectTokenSurvivesLiveStartDuringDiagnostics() async throws {
         let recorder = BandDiagnosticsRecorder(capacity: 64)
-        let (session, generation, _) = try await readySessionWithToken(
+        let (session, generation, connectionToken) =
+            try await readySessionWithToken(
             diagnostics: recorder
         )
-        let reconnectGeneration = try await session.interruptForReconnect(
+        let reconnectAuthority = try await session.interruptForReconnect(
+            token: connectionToken,
             callbackGeneration: generation
         )
         await recorder.requestNextRecordSuspensionForTesting()
 
         let resumeTask = Task {
             try await session.resumeAfterReconnect(
-                callbackGeneration: reconnectGeneration
+                token: reconnectAuthority,
+                callbackGeneration: reconnectAuthority.generation
             )
         }
         await recorder.waitForRecordSuspensionForTesting()
@@ -1291,7 +1477,7 @@ struct BandSessionMachineTests {
         try await session.failEstablishedSession(
             .authentication,
             token: reconnectToken,
-            callbackGeneration: reconnectGeneration
+            callbackGeneration: reconnectAuthority.generation
         )
         let rejected = await session.snapshot()
         #expect(rejected.state == .rejected)
@@ -1746,8 +1932,8 @@ struct BandSessionMachineTests {
     @Test("Pending persistence blocks lifecycle terminals until drained")
     func pendingPersistenceBlocksLifecycleTerminals() async throws {
         let liveRecorder = BandDiagnosticsRecorder()
-        let (liveSession, liveGeneration) =
-            try await readySession(diagnostics: liveRecorder)
+        let (liveSession, liveGeneration, liveConnectionToken) =
+            try await readySessionWithToken(diagnostics: liveRecorder)
         let liveToken = try await liveSession.beginLive()
         let liveAcceptance = try await liveSession.stageLiveBatch(
             VirtualBandFixtures.liveBatch,
@@ -1764,6 +1950,7 @@ struct BandSessionMachineTests {
         }
         await #expect(throws: BandFailureCategory.busy) {
             _ = try await liveSession.interruptForReconnect(
+                token: liveConnectionToken,
                 callbackGeneration: liveGeneration
             )
         }
@@ -1796,8 +1983,11 @@ struct BandSessionMachineTests {
         #expect(await liveSession.snapshot().state == .rejected)
 
         let historyRecorder = BandDiagnosticsRecorder()
-        let (historySession, historyGeneration) =
-            try await readySession(diagnostics: historyRecorder)
+        let (
+            historySession,
+            historyGeneration,
+            historyConnectionToken
+        ) = try await readySessionWithToken(diagnostics: historyRecorder)
         let historyToken = try await historySession.beginOperation(.history)
         let historyAcceptance = try await historySession.stageHistoryChunk(
             VirtualBandFixtures.historyChunk,
@@ -1815,6 +2005,7 @@ struct BandSessionMachineTests {
         }
         await #expect(throws: BandFailureCategory.busy) {
             _ = try await historySession.interruptForReconnect(
+                token: historyConnectionToken,
                 callbackGeneration: historyGeneration
             )
         }
@@ -2327,10 +2518,15 @@ struct BandSessionMachineTests {
         #expect(await cancelledKinds(in: firmwareRecorder) == [.firmware])
 
         let reconnectRecorder = BandDiagnosticsRecorder()
-        let (reconnect, reconnectGeneration) = try await readySession(
+        let (
+            reconnect,
+            reconnectGeneration,
+            reconnectConnectionToken
+        ) = try await readySessionWithToken(
             diagnostics: reconnectRecorder
         )
         _ = try await reconnect.interruptForReconnect(
+            token: reconnectConnectionToken,
             callbackGeneration: reconnectGeneration
         )
         try await reconnect.close()

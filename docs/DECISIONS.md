@@ -9,3 +9,4 @@
 | SDK-D-005 | Supplier types and persistence remain behind neutral Apple/Android adapters; NOOP owns provenance, storage, checkpoints, diagnostics, and product behavior. | Active |
 | SDK-D-006 | No GitHub Actions workflow is enabled initially. Local deterministic checks precede one budgeted hosted release check when approved. | Active |
 | SDK-D-007 | Cross-platform bounded strings use UTF-8 bytes; samples use non-negative signed 64-bit sequence/time domains; recent identity memory is bounded and application storage remains the durable dedupe authority. | Active |
+| SDK-D-008 | Reconnect interruption and completion require exact session-issued connection and reconnect credentials; a disconnected non-firmware operation returns resume authority, while invalidated connection/capability/firmware recovery requires rediscovery. Kotlin snapshots supplier-owned collections with bounded traversal and rejects JVM null elements as fixed invalid input. | Active |

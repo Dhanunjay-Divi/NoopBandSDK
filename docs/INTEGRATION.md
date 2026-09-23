@@ -55,7 +55,10 @@ or failure must also include the bounded phase captured for that attempt; the
 adapter must not infer phase from current replacement-session state. Sample
 sequences and device-time milliseconds use the non-negative signed 64-bit
 range on both platforms. Bounded protocol strings use UTF-8 byte counts.
-Adapters must reject values outside these domains.
+Adapters must reject values outside these domains. On Kotlin/JVM, the adapter
+must expect every caller-owned list and set to be snapshotted once under the
+SDK limit; collection exceptions, nonterminating/repeating traversal, reported
+oversize, and null elements are rejected as `invalidInput`.
 
 ## Band connection and authentication pass
 
@@ -90,9 +93,22 @@ The production adapter must preserve these distinct authorities:
    persistence receipt. An exact negative receipt releases the reservation
    without advancing durable identity or cursor state.
 8. Cancellation, timeout, disconnect, and supplier failure terminate the active
-   neutral operation explicitly after pending persistence drains. Reconnect
-   creates a new generation and rejects old callbacks. Authentication failures
-   invalidate the authenticated generation before another command can begin.
+   neutral operation explicitly after pending persistence drains. Established
+   non-firmware reconnect interruption passes the exact active
+   `BandConnectionToken`, creates a new generation, and returns a
+   `BandReconnectToken`. The adapter retains that opaque token and passes it
+   with the new generation to
+   `resumeAfterReconnect`; successful resume consumes it and returns the new
+   connection token. A foreign token is stale even when its generation is
+   numerically equal. If reconnect interrupts live collection, the SDK records
+   `live/interrupted` before clearing live state and then records
+   `reconnect/interrupted`. A disconnected non-firmware `failOperation` call
+   returns the same kind of reconnect token because its active operation token
+   already authorizes that terminal. A `nil`/`null` result means there is no
+   resumable authority. Recovery from connection, capability, and firmware
+   failures clears negotiation state and must restart at `beginScan`.
+   Authentication failures invalidate the authenticated generation before
+   another command can begin.
 9. Collector handoff flushes accepted samples and checkpoints, releases the
    account lease, disconnects the old phone, and only then permits another
    authorized phone to collect.
