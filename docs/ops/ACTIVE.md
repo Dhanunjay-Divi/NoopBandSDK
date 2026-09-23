@@ -16,7 +16,10 @@ Last updated: **2026-09-23**
   procedural, not enforced by a repository rule
 - Active branch: `codex/sdk-pr25-session-authority-20260923`
 - Start commit: `f20f4ed552328a64a8a598aaac72befa1d481262`
-- Implementation commit: pending publication
+- Implementation commits:
+  `4fdef89d6047a270e90b6b0434461a7aca2ed10e`,
+  `2281b3665b2cf83f8445f4fdd52b373925bec551`
+- Evidence commit: this documentation-only commit
 - PR merge: pending
 - Supplier binaries: absent and prohibited
 - WHOOP application transport: unchanged
@@ -229,6 +232,9 @@ possession proof, firmware flashing, or OTA behavior.
     post-suspension guard now preserves exact token authority and the direct
     suspended-record regression passes;
   - final exact-diff re-review reports no remaining P0-P2 finding;
+  - two independently generated source exports from implementation head
+    `2281b366` are byte-identical; the candidate manifest SHA-256 is
+    `d980188805fc7e1424501c365773e0b65542c163077d481fa266b91925d563ac`;
   - publication commit, PR, merge, deterministic exports, and application
     repin remain pending.
 
