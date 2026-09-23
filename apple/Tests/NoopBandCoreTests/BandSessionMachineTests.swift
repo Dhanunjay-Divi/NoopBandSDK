@@ -80,6 +80,28 @@ struct BandSessionMachineTests {
         #expect(result.acceptedSamples == 1)
     }
 
+    @Test("A checkpoint survives an intervening source connection")
+    func restoredCheckpointSurvivesAnInterveningSource() async throws {
+        let result = try await BandConformanceRunner.run(
+            "history_checkpoint_survives_source_mismatch"
+        )
+        #expect(result.failure == nil)
+        #expect(result.acknowledgedCursor == "cursor-2")
+        #expect(result.acceptedSamples == 2)
+    }
+
+    @Test("Intentional disconnect returns a reusable idle session")
+    func gracefulDisconnectReturnsAReusableIdleSession() async throws {
+        let result = try await BandConformanceRunner.run(
+            "graceful_disconnect_to_idle"
+        )
+        #expect(
+            result.failure == BandFailureCategory.staleCallback.rawValue
+        )
+        #expect(result.finalState == BandSessionState.idle.rawValue)
+        #expect(result.events.contains("session_reusable"))
+    }
+
     @Test("Firmware capability failures retain their dedicated category")
     func firmwareEligibilityIsSpecific() async throws {
         let result = try await BandConformanceRunner.run(
@@ -793,6 +815,176 @@ struct BandSessionMachineTests {
         )
     }
 
+    @Test("Disconnect generation is revalidated after diagnostic suspension")
+    func disconnectGenerationIsNotReturnedAfterClose() async throws {
+        let recorder = BandDiagnosticsRecorder(capacity: 64)
+        let (session, generation) = try await readySession(
+            diagnostics: recorder
+        )
+        _ = try await session.beginLive()
+        _ = try await session.beginOperation(.history)
+        await recorder.requestNextRecordSuspensionForTesting()
+
+        let disconnectTask = Task {
+            try await session.disconnect(
+                reason: .userPaused,
+                callbackGeneration: generation
+            )
+        }
+        await recorder.waitForRecordSuspensionForTesting()
+        try await session.close()
+        await recorder.resumeSuspendedRecordForTesting()
+
+        await #expect(throws: BandFailureCategory.staleCallback) {
+            _ = try await disconnectTask.value
+        }
+        let snapshot = await session.snapshot()
+        #expect(snapshot.state == .closed)
+        #expect(snapshot.generation == generation + 2)
+        let events = await recorder.snapshot()
+        #expect(
+            events.contains(
+                BandDiagnosticEvent(
+                    kind: .history,
+                    outcome: .cancelled
+                )
+            )
+        )
+        #expect(
+            events.contains(
+                BandDiagnosticEvent(
+                    kind: .live,
+                    outcome: .cancelled
+                )
+            )
+        )
+        #expect(
+            events.contains(
+                BandDiagnosticEvent(
+                    kind: .disconnect,
+                    outcome: .cancelled
+                )
+            )
+        )
+        #expect(
+            events.contains(
+                BandDiagnosticEvent(
+                    kind: .disconnect,
+                    outcome: .stale,
+                    failureCategory: .staleCallback
+                )
+            )
+        )
+    }
+
+    @Test("Disconnect invalidates staging before diagnostic suspension")
+    func disconnectRejectsStagingDuringDiagnosticSuspension() async throws {
+        let recorder = BandDiagnosticsRecorder(capacity: 64)
+        let (session, generation) = try await readySession(
+            diagnostics: recorder
+        )
+        let historyToken = try await session.beginOperation(.history)
+        await recorder.requestNextRecordSuspensionForTesting()
+
+        let disconnectTask = Task {
+            try await session.disconnect(
+                reason: .collectorHandoff,
+                callbackGeneration: generation
+            )
+        }
+        await recorder.waitForRecordSuspensionForTesting()
+
+        await #expect(throws: BandFailureCategory.staleCallback) {
+            _ = try await session.stageHistoryChunk(
+                VirtualBandFixtures.historyChunk,
+                token: historyToken,
+                callbackGeneration: generation
+            )
+        }
+        let disconnecting = await session.snapshot()
+        #expect(disconnecting.state == .disconnecting)
+        #expect(disconnecting.generation == generation + 1)
+        #expect(disconnecting.activeOperation == .history)
+        #expect(!disconnecting.liveActive)
+
+        await recorder.resumeSuspendedRecordForTesting()
+        let idleGeneration = try await disconnectTask.value
+        #expect(idleGeneration == generation + 1)
+        let idle = await session.snapshot()
+        #expect(idle.state == .idle)
+        #expect(idle.activeOperation == nil)
+        #expect(!idle.liveActive)
+        let events = await recorder.snapshot()
+        #expect(
+            events.contains(
+                BandDiagnosticEvent(
+                    kind: .history,
+                    outcome: .stale,
+                    failureCategory: .staleCallback
+                )
+            )
+        )
+    }
+
+    @Test("Stopping live cannot abort a suspended disconnect")
+    func stopLiveCannotAbortSuspendedDisconnect() async throws {
+        let recorder = BandDiagnosticsRecorder(capacity: 64)
+        let (session, generation) = try await readySession(
+            diagnostics: recorder
+        )
+        _ = try await session.beginLive()
+        await recorder.requestNextRecordSuspensionForTesting()
+
+        let disconnectTask = Task {
+            try await session.disconnect(
+                reason: .userPaused,
+                callbackGeneration: generation
+            )
+        }
+        await recorder.waitForRecordSuspensionForTesting()
+
+        await #expect(throws: BandFailureCategory.invalidState) {
+            try await session.stopLive()
+        }
+        let disconnecting = await session.snapshot()
+        #expect(disconnecting.state == .disconnecting)
+        #expect(disconnecting.generation == generation + 1)
+        #expect(disconnecting.liveActive)
+
+        await recorder.resumeSuspendedRecordForTesting()
+        let idleGeneration = try await disconnectTask.value
+        #expect(idleGeneration == generation + 1)
+        let idle = await session.snapshot()
+        #expect(idle.state == .idle)
+        #expect(!idle.liveActive)
+        let events = await recorder.snapshot()
+        #expect(
+            events.contains(
+                BandDiagnosticEvent(
+                    kind: .live,
+                    outcome: .rejected,
+                    failureCategory: .invalidState
+                )
+            )
+        )
+        #expect(
+            events.contains(
+                BandDiagnosticEvent(
+                    kind: .live,
+                    outcome: .cancelled
+                )
+            )
+        )
+        #expect(
+            events.contains(
+                BandDiagnosticEvent(
+                    kind: .disconnect,
+                    outcome: .completed
+                )
+            )
+        )
+    }
+
     @Test("Connection callbacks are bound to the selected candidate token")
     func connectionCallbacksRejectForeignCandidateToken() async throws {
         let session = BandSessionMachine()
@@ -1322,6 +1514,12 @@ struct BandSessionMachineTests {
             )
         }
         await #expect(throws: BandFailureCategory.busy) {
+            _ = try await liveSession.disconnect(
+                reason: .userPaused,
+                callbackGeneration: liveGeneration
+            )
+        }
+        await #expect(throws: BandFailureCategory.busy) {
             try await liveSession.close()
         }
         let pendingLive = await liveSession.snapshot()
@@ -1363,6 +1561,12 @@ struct BandSessionMachineTests {
         }
         await #expect(throws: BandFailureCategory.busy) {
             _ = try await historySession.interruptForReconnect(
+                callbackGeneration: historyGeneration
+            )
+        }
+        await #expect(throws: BandFailureCategory.busy) {
+            _ = try await historySession.disconnect(
+                reason: .collectorHandoff,
                 callbackGeneration: historyGeneration
             )
         }
