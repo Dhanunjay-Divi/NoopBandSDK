@@ -248,6 +248,12 @@ data class BandPairingCandidate(
     val compatible: Boolean,
     val identifyEligible: Boolean,
 ) {
+    override fun toString(): String =
+        "BandPairingCandidate(" +
+            "compatible=$compatible, " +
+            "identifyEligible=$identifyEligible" +
+            ")"
+
     fun validate() {
         if (
             !handle.hasValidUtf8Length(BandContractLimits.OPAQUE_HANDLE_LENGTH)
@@ -677,7 +683,15 @@ data class BandHistoryChunk(
     }
 }
 
-internal fun <T : Any> List<T>.boundedSnapshot(maximumSize: Int): List<T> {
+internal inline fun <reified T : Any> List<T>.boundedSnapshot(
+    maximumSize: Int,
+): List<T> = boundedSnapshot(maximumSize, T::class.java)
+
+@PublishedApi
+internal fun <T : Any> List<T>.boundedSnapshot(
+    maximumSize: Int,
+    elementType: Class<T>,
+): List<T> {
     val expectedSize = try {
         size
     } catch (_: BandException) {
@@ -696,11 +710,10 @@ internal fun <T : Any> List<T>.boundedSnapshot(maximumSize: Int): List<T> {
                 fail(BandFailureCategory.INVALID_INPUT)
             }
             val element: Any? = iterator.next()
-            if (element == null) {
+            if (element == null || !elementType.isInstance(element)) {
                 fail(BandFailureCategory.INVALID_INPUT)
             }
-            @Suppress("UNCHECKED_CAST")
-            snapshot += element as T
+            snapshot += elementType.cast(element)
         }
     } catch (_: BandException) {
         fail(BandFailureCategory.INVALID_INPUT)
@@ -713,7 +726,15 @@ internal fun <T : Any> List<T>.boundedSnapshot(maximumSize: Int): List<T> {
     return snapshot
 }
 
-internal fun <T : Any> Set<T>.boundedSnapshot(maximumSize: Int): Set<T> {
+internal inline fun <reified T : Any> Set<T>.boundedSnapshot(
+    maximumSize: Int,
+): Set<T> = boundedSnapshot(maximumSize, T::class.java)
+
+@PublishedApi
+internal fun <T : Any> Set<T>.boundedSnapshot(
+    maximumSize: Int,
+    elementType: Class<T>,
+): Set<T> {
     val expectedSize = try {
         size
     } catch (_: BandException) {
@@ -734,11 +755,10 @@ internal fun <T : Any> Set<T>.boundedSnapshot(maximumSize: Int): Set<T> {
             }
             iteratorSteps += 1
             val element: Any? = iterator.next()
-            if (element == null) {
+            if (element == null || !elementType.isInstance(element)) {
                 fail(BandFailureCategory.INVALID_INPUT)
             }
-            @Suppress("UNCHECKED_CAST")
-            snapshot += element as T
+            snapshot += elementType.cast(element)
         }
     } catch (_: BandException) {
         fail(BandFailureCategory.INVALID_INPUT)

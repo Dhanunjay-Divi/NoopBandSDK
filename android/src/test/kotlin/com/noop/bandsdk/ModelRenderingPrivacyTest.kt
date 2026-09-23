@@ -7,6 +7,35 @@ import kotlin.test.assertTrue
 
 class ModelRenderingPrivacyTest {
     @Test
+    fun pairingCandidateRendersOnlyNonSensitiveDisplayState() {
+        val candidate = BandPairingCandidate(
+            handle = CANDIDATE_HANDLE_SENTINEL,
+            compatible = true,
+            identifyEligible = false,
+        )
+        val expected =
+            "BandPairingCandidate(" +
+                "compatible=true, " +
+                "identifyEligible=false" +
+                ")"
+        val rendered = listOf(
+            candidate.toString(),
+            "$candidate",
+            listOf(candidate).toString(),
+        )
+
+        rendered.forEach {
+            assertEquals(
+                if (it.startsWith("[")) "[$expected]" else expected,
+                it,
+            )
+            assertTrue(it.contains("compatible=true"))
+            assertTrue(it.contains("identifyEligible=false"))
+            assertPrivacySafe(it)
+        }
+    }
+
+    @Test
     fun modelsRenderTypeNamesWithoutSensitiveContent() {
         modelFixtures().forEach { (name, value) ->
             val direct = value.toString()
@@ -110,6 +139,8 @@ class ModelRenderingPrivacyTest {
     }
 
     private companion object {
+        const val CANDIDATE_HANDLE_SENTINEL =
+            "AA:BB:CC:DD:EE:FF/vendor-sentinel-5a27"
         const val SOURCE_SENTINEL = "sentinel-source-4f91"
         const val HARDWARE_SENTINEL = "sentinel-hardware-2d73"
         const val FIRMWARE_SENTINEL = "sentinel-firmware-8a15"
@@ -131,6 +162,7 @@ class ModelRenderingPrivacyTest {
         const val RETAINED_END_SENTINEL = 1_977_777_773_000L
 
         val sensitiveSentinels = listOf(
+            CANDIDATE_HANDLE_SENTINEL,
             SOURCE_SENTINEL,
             HARDWARE_SENTINEL,
             FIRMWARE_SENTINEL,
@@ -153,6 +185,7 @@ class ModelRenderingPrivacyTest {
         )
 
         val sensitiveLabels = listOf(
+            "handle=",
             "sourceIdentity",
             "hardwareRevision",
             "firmwareVersion",

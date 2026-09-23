@@ -337,7 +337,13 @@ public struct BandStreamSemantics:
     }
 }
 
-public struct BandPairingCandidate: Equatable, Sendable {
+public struct BandPairingCandidate:
+    Equatable,
+    Sendable,
+    CustomStringConvertible,
+    CustomDebugStringConvertible,
+    CustomReflectable
+{
     public let handle: String
     public let compatible: Bool
     public let identifyEligible: Bool
@@ -355,6 +361,25 @@ public struct BandPairingCandidate: Equatable, Sendable {
         else {
             throw BandFailureCategory.invalidInput
         }
+    }
+
+    public var description: String {
+        "BandPairingCandidate("
+            + "compatible: \(compatible), "
+            + "identifyEligible: \(identifyEligible)"
+            + ")"
+    }
+
+    public var debugDescription: String { description }
+    public var customMirror: Mirror {
+        Mirror(
+            self,
+            children: [
+                "compatible": compatible,
+                "identifyEligible": identifyEligible,
+            ],
+            displayStyle: .struct
+        )
     }
 }
 

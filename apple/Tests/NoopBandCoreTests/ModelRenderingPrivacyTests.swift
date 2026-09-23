@@ -3,6 +3,45 @@ import Testing
 
 @Suite("SDK model rendering privacy")
 struct ModelRenderingPrivacyTests {
+    @Test("Pairing candidate renders only non-sensitive display state")
+    func pairingCandidateRedactsOpaqueHandle() {
+        let candidate = BandPairingCandidate(
+            handle: Self.candidateHandleSentinel,
+            compatible: true,
+            identifyEligible: false
+        )
+        let expected =
+            "BandPairingCandidate("
+            + "compatible: true, "
+            + "identifyEligible: false"
+            + ")"
+        let description = String(describing: candidate)
+        let reflection = String(reflecting: candidate)
+        let mirror = Mirror(reflecting: candidate)
+        let children = Array(mirror.children)
+        var dumpOutput = ""
+        dump(candidate, to: &dumpOutput)
+
+        #expect(description == expected)
+        #expect(reflection == expected)
+        #expect(mirror.displayStyle == .struct)
+        #expect(children.count == 2)
+        #expect(children[0].label == "compatible")
+        #expect(children[0].value as? Bool == true)
+        #expect(children[1].label == "identifyEligible")
+        #expect(children[1].value as? Bool == false)
+        #expect(dumpOutput.contains("compatible"))
+        #expect(dumpOutput.contains("identifyEligible"))
+
+        [
+            description,
+            reflection,
+            dumpOutput,
+            String(describing: [candidate]),
+            String(reflecting: [candidate]),
+        ].forEach(expectPrivacySafe)
+    }
+
     @Test("Models redact String, reflection, Mirror, and dump output")
     func modelsRedactDirectRendering() {
         let fixtures = modelFixtures()
@@ -149,6 +188,8 @@ struct ModelRenderingPrivacyTests {
     }
 
     private static let sourceSentinel = "sentinel-source-4f91"
+    private static let candidateHandleSentinel =
+        "AA:BB:CC:DD:EE:FF/vendor-sentinel-5a27"
     private static let hardwareSentinel = "sentinel-hardware-2d73"
     private static let firmwareSentinel = "sentinel-firmware-8a15"
     private static let protocolSentinel = "sentinel-protocol-6c24"
@@ -170,6 +211,7 @@ struct ModelRenderingPrivacyTests {
     private static let retainedEndSentinel: Int64 = 1_977_777_773_000
 
     private static let sensitiveSentinels = [
+        candidateHandleSentinel,
         sourceSentinel,
         hardwareSentinel,
         firmwareSentinel,
@@ -192,6 +234,7 @@ struct ModelRenderingPrivacyTests {
     ]
 
     private static let sensitiveLabels = [
+        "handle",
         "sourceIdentity",
         "hardwareRevision",
         "firmwareVersion",
