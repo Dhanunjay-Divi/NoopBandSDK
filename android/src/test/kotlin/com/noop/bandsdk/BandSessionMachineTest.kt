@@ -2867,6 +2867,7 @@ class BandSessionMachineTest {
             readyGeneration,
             readyConnectionToken,
         ) = readySessionWithToken(readyRecorder)
+        val readyFailureEventCount = readyRecorder.snapshot().size
         readyFailureSession.failEstablishedSession(
             BandFailureCategory.AUTHENTICATION,
             readyConnectionToken,
@@ -2876,12 +2877,14 @@ class BandSessionMachineTest {
         assertEquals(BandSessionState.REJECTED, rejected.state)
         assertEquals(readyGeneration + 1, rejected.generation)
         assertEquals(
-            BandDiagnosticEvent(
-                BandDiagnosticKind.AUTHENTICATION,
-                BandDiagnosticOutcome.REJECTED,
-                failureCategory = BandFailureCategory.AUTHENTICATION,
+            listOf(
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.AUTHENTICATION,
+                    BandDiagnosticOutcome.REJECTED,
+                    failureCategory = BandFailureCategory.AUTHENTICATION,
+                ),
             ),
-            readyRecorder.snapshot().last(),
+            readyRecorder.snapshot().drop(readyFailureEventCount),
         )
 
         val liveRecorder = BandDiagnosticsRecorder()

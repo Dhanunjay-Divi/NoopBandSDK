@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `locally verified; independent review and integration pending`
+- State: `locally verified; independent review complete; integration pending`
 - Branch: `codex/sdk-pr30-final-review-20260923`
 - Start commit: `38cf7de3b1c92dd30dad343af2adfa2cb61dea2e`
 - Supplier artifacts: absent and prohibited
@@ -51,32 +51,37 @@ health value, or arbitrary exception text is recorded.
   established authentication/security terminal invalidates the session. They
   record `live/interrupted` before `authentication/rejected`, using only the
   fixed failure category.
-- Android explicitly propagates the category returned by capability-report
-  validation during initial negotiation. The prior non-returning helper
-  already produced `INCOMPATIBLE`; the explicit branch and regression remove
-  the ambiguous control flow without changing late malformed-callback state
-  preservation.
+- The reported Android category defect was a control-flow false positive:
+  initial validation calls the non-returning incompatible-rejection helper,
+  so the later `invalidInput` branch is unreachable in that state. A direct
+  unsupported-schema regression now proves the returned category, diagnostic,
+  and terminal state without changing the correct production path.
 
 ## Verification
 
-- Focused Apple capability suspension regressions: `2/2` passed.
+- Focused added Apple command-progress suspension regression: `1/1` passed;
+  the prior two suspension regressions remain covered by the complete wall.
 - Focused Android capability-category and live-terminal regressions: passed.
-- Complete Swift package: `93/93` passed.
+- Complete Swift package: `94/94` passed.
 - Complete Kotlin/JVM tests and `installDist`: passed.
 - Shared conformance: `50/50` Swift/Kotlin scenarios matched.
 - Repository gate: `68` files passed language, binary, and JSON checks.
 - Capability JSON parsing and `git diff --check`: passed.
 - All verbose commands used the bounded runner with private capped logs under
   `/tmp/sdk-pr30-*`; no resource stop occurred.
+- Independent exact-diff review found no P0/P1 and three P2 test gaps. The
+  corrected tests cover valid command progress during Apple diagnostic
+  suspension, exact ready-session diagnostic deltas on both platforms, and
+  preserve the direct Android incompatible-category proof without retaining
+  a behaviorally unnecessary production refactor.
 
 ## Remaining ordered work
 
-1. Complete independent exact-diff review.
-2. Commit, push, and integrate the SDK through a normal pull request.
-3. Export the exact SDK merge twice and verify byte identity.
-4. Repin the NOOP application PR `#17`, rerun its local and hosted exact-head
+1. Commit, push, and integrate the SDK through a normal pull request.
+2. Export the exact SDK merge twice and verify byte identity.
+3. Repin the NOOP application PR `#17`, rerun its local and hosted exact-head
    gates, resolve reviewed threads, and integrate normally.
-5. Remove only round-owned logs, caches, exports, and clean worktrees.
+4. Remove only round-owned logs, caches, exports, and clean worktrees.
 
 ## External gates
 

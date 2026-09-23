@@ -2181,6 +2181,30 @@ struct BandSessionMachineTests {
         try await session.stopLive(token: liveToken)
     }
 
+    @Test("Capability completion permits valid command progress")
+    func capabilityCompletionPermitsValidCommandProgress() async throws {
+        let recorder = BandDiagnosticsRecorder(capacity: 64)
+        let (session, generation, connectionToken) =
+            try await negotiatingSessionWithToken(diagnostics: recorder)
+        await recorder.requestNextRecordSuspensionForTesting()
+
+        let capabilityTask = Task {
+            try await session.acceptCapabilities(
+                VirtualBandFixtures.capabilities,
+                token: connectionToken,
+                callbackGeneration: generation
+            )
+        }
+        await recorder.waitForRecordSuspensionForTesting()
+        let operation = try await session.beginOperation(.battery)
+        #expect(await session.snapshot().activeOperation == .battery)
+
+        await recorder.resumeSuspendedRecordForTesting()
+        try await capabilityTask.value
+        #expect(await session.snapshot().activeOperation == .battery)
+        try await session.cancelOperation(operation)
+    }
+
     @Test("Scan generation is revalidated after diagnostic suspension")
     func scanGenerationIsNotReturnedAfterClose() async throws {
         let recorder = BandDiagnosticsRecorder(capacity: 64)
@@ -2423,6 +2447,7 @@ struct BandSessionMachineTests {
             readyGeneration,
             readyConnectionToken
         ) = try await readySessionWithToken(diagnostics: readyRecorder)
+        let readyFailureEventCount = await readyRecorder.snapshot().count
         try await readyFailureSession.failEstablishedSession(
             .authentication,
             token: readyConnectionToken,
@@ -2432,11 +2457,17 @@ struct BandSessionMachineTests {
         #expect(rejected.state == .rejected)
         #expect(rejected.generation == readyGeneration + 1)
         #expect(
-            await readyRecorder.snapshot().last == BandDiagnosticEvent(
-                kind: .authentication,
-                outcome: .rejected,
-                failureCategory: .authentication
-            )
+            Array(
+                await readyRecorder.snapshot().dropFirst(
+                    readyFailureEventCount
+                )
+            ) == [
+                BandDiagnosticEvent(
+                    kind: .authentication,
+                    outcome: .rejected,
+                    failureCategory: .authentication
+                ),
+            ]
         )
 
         let liveRecorder = BandDiagnosticsRecorder()

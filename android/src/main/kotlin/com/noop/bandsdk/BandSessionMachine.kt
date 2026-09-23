@@ -527,18 +527,9 @@ class BandSessionMachine(
         )
         try {
             immutableReport.validate()
-        } catch (error: BandException) {
+        } catch (_: BandException) {
             if (state == BandSessionState.NEGOTIATING_CAPABILITIES) {
-                state = BandSessionState.INCOMPATIBLE
-                capabilityReport = null
-                diagnostics.record(
-                    BandDiagnosticEvent(
-                        BandDiagnosticKind.CAPABILITY,
-                        BandDiagnosticOutcome.REJECTED,
-                        failureCategory = error.category,
-                    ),
-                )
-                fail(error.category)
+                rejectCapabilities(mutateSession = true)
             }
             diagnostics.record(
                 BandDiagnosticEvent(
