@@ -7,8 +7,9 @@ cleartext setting, and scan policy are not production inputs.
 Implemented neutral-core gates:
 
 - one synchronized neutral session and serialized command queue;
-- generation-fenced discovery, connection/authentication, capability, data,
-  receipt, and reconnect callbacks;
+- session-token-bound discovery plus generation- and credential-fenced
+  connection/authentication, capability, data, receipt, and reconnect
+  callbacks;
 - capability revision validation and fail-closed incompatibility;
 - live/history separation and deterministic deduplication;
 - durable app-store receipt before historical checkpoint advance;

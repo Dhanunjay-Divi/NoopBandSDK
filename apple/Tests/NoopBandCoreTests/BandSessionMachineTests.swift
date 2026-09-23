@@ -203,6 +203,45 @@ struct BandSessionMachineTests {
         #expect(result.finalState == BandSessionState.ready.rawValue)
     }
 
+    @Test("Scan callbacks are bound to the issuing session")
+    func scanCallbacksAreSessionBound() async throws {
+        let result = try await BandConformanceRunner.run(
+            "scan_callback_session_bound"
+        )
+        #expect(
+            result.events == [
+                "scan_pair",
+                "foreign_select_rejected",
+                "foreign_cancel_rejected",
+                "foreign_failure_rejected",
+                "current_scan_preserved",
+                "own_select_accepted",
+                "current_session_ready",
+            ]
+        )
+        #expect(result.failure == BandFailureCategory.staleCallback.rawValue)
+        #expect(result.finalState == BandSessionState.ready.rawValue)
+    }
+
+    @Test("Scan token string rendering is redacted")
+    func scanTokenStringRenderingIsRedacted() async throws {
+        let token = try await BandSessionMachine().beginScan()
+        #expect(String(describing: token) == "BandScanToken")
+        #expect(String(reflecting: token) == "BandScanToken")
+
+        var dumpOutput = ""
+        dump(token, to: &dumpOutput)
+        #expect(dumpOutput.contains("BandScanToken"))
+        #expect(!dumpOutput.contains("sessionNonce"))
+        #expect(!dumpOutput.contains("generation"))
+        #expect(
+            dumpOutput.range(
+                of: #"[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}"#,
+                options: .regularExpression
+            ) == nil
+        )
+    }
+
     @Test("Receipts and operation tokens are bound to one session")
     func receiptsAndTokensAreSessionBound() async throws {
         let result = try await BandConformanceRunner.run(
@@ -379,10 +418,11 @@ struct BandSessionMachineTests {
     @Test("Security failure requires a replacement session object")
     func securityFailureRequiresReplacementSession() async throws {
         let session = BandSessionMachine()
-        let generation = try await session.beginScan()
+        let scanToken = try await session.beginScan()
+        let generation = scanToken.generation
         let connectionToken = try await session.selectCandidate(
             VirtualBandFixtures.candidate,
-            callbackGeneration: generation
+            callbackGeneration: scanToken
         )
         try await session.beginConnection(
             token: connectionToken,
@@ -415,7 +455,8 @@ struct BandSessionMachineTests {
         #expect(unchanged.generation == terminal.generation)
 
         let replacement = BandSessionMachine()
-        let replacementGeneration = try await replacement.beginScan()
+        let replacementScanToken = try await replacement.beginScan()
+        let replacementGeneration = replacementScanToken.generation
         let replacementSnapshot = await replacement.snapshot()
         #expect(replacementGeneration == 1)
         #expect(replacementSnapshot.state == .scanning)
@@ -621,11 +662,12 @@ struct BandSessionMachineTests {
                 callbackGeneration: cancelledGeneration
             )
         }
-        let retryGeneration = try await cancelledSession.beginScan()
+        let retryScanToken = try await cancelledSession.beginScan()
+        let retryGeneration = retryScanToken.generation
         #expect(retryGeneration == cancelled.generation + 1)
         let retryConnectionToken = try await cancelledSession.selectCandidate(
             VirtualBandFixtures.candidate,
-            callbackGeneration: retryGeneration
+            callbackGeneration: retryScanToken
         )
         try await cancelledSession.beginConnection(
             token: retryConnectionToken,
@@ -749,7 +791,8 @@ struct BandSessionMachineTests {
         await #expect(throws: BandFailureCategory.invalidState) {
             _ = try await session.beginOperation(.battery)
         }
-        let retryGeneration = try await session.beginScan()
+        let retryScanToken = try await session.beginScan()
+        let retryGeneration = retryScanToken.generation
         #expect(retryGeneration == failed.generation + 1)
     }
 
@@ -988,10 +1031,11 @@ struct BandSessionMachineTests {
     @Test("Connection callbacks are bound to the selected candidate token")
     func connectionCallbacksRejectForeignCandidateToken() async throws {
         let session = BandSessionMachine()
-        let generation = try await session.beginScan()
+        let scanToken = try await session.beginScan()
+        let generation = scanToken.generation
         let selectedToken = try await session.selectCandidate(
             VirtualBandFixtures.candidate,
-            callbackGeneration: generation
+            callbackGeneration: scanToken
         )
         let foreignToken = BandConnectionToken(
             sessionNonce: selectedToken.sessionNonce,
@@ -1139,10 +1183,11 @@ struct BandSessionMachineTests {
             capabilities: BandCapabilityReport
         ) async throws -> (BandSessionMachine, UInt64) {
             let session = BandSessionMachine()
-            let generation = try await session.beginScan()
+            let scanToken = try await session.beginScan()
+            let generation = scanToken.generation
             let connectionToken = try await session.selectCandidate(
                 VirtualBandFixtures.candidate,
-                callbackGeneration: generation
+                callbackGeneration: scanToken
             )
             try await session.beginConnection(
                 token: connectionToken,
@@ -1216,16 +1261,9 @@ struct BandSessionMachineTests {
         )
         try await liveSession.stopLive()
 
-        let unsupportedHistoryToken =
-            try await liveSession.beginOperation(.history)
         await #expect(throws: BandFailureCategory.unsupported) {
-            _ = try await liveSession.stageHistoryChunk(
-                VirtualBandFixtures.historyChunk,
-                token: unsupportedHistoryToken,
-                callbackGeneration: liveGeneration
-            )
+            _ = try await liveSession.beginOperation(.history)
         }
-        try await liveSession.cancelOperation(unsupportedHistoryToken)
     }
 
     @Test("Overflow ranges are validated and bound to durable receipts")
@@ -1998,10 +2036,11 @@ struct BandSessionMachineTests {
 
         let connectionRecorder = BandDiagnosticsRecorder()
         let connection = BandSessionMachine(diagnostics: connectionRecorder)
-        let connectionGeneration = try await connection.beginScan()
+        let connectionScanToken = try await connection.beginScan()
+        let connectionGeneration = connectionScanToken.generation
         let connectionToken = try await connection.selectCandidate(
             VirtualBandFixtures.candidate,
-            callbackGeneration: connectionGeneration
+            callbackGeneration: connectionScanToken
         )
         try await connection.beginConnection(
             token: connectionToken,
@@ -2013,10 +2052,11 @@ struct BandSessionMachineTests {
         let authenticationRecorder = BandDiagnosticsRecorder()
         let authentication =
             BandSessionMachine(diagnostics: authenticationRecorder)
-        let authenticationGeneration = try await authentication.beginScan()
+        let authenticationScanToken = try await authentication.beginScan()
+        let authenticationGeneration = authenticationScanToken.generation
         let authenticationToken = try await authentication.selectCandidate(
             VirtualBandFixtures.candidate,
-            callbackGeneration: authenticationGeneration
+            callbackGeneration: authenticationScanToken
         )
         try await authentication.beginConnection(
             token: authenticationToken,
@@ -2189,10 +2229,11 @@ struct BandSessionMachineTests {
     func authenticationBeginIsReentrancySafe() async throws {
         let recorder = BandDiagnosticsRecorder(capacity: 64)
         let session = BandSessionMachine(diagnostics: recorder)
-        let generation = try await session.beginScan()
+        let scanToken = try await session.beginScan()
+        let generation = scanToken.generation
         let connectionToken = try await session.selectCandidate(
             VirtualBandFixtures.candidate,
-            callbackGeneration: generation
+            callbackGeneration: scanToken
         )
         try await session.beginConnection(
             token: connectionToken,
@@ -2244,10 +2285,11 @@ struct BandSessionMachineTests {
     func authenticationTransitionDiagnosticsStayOrdered() async throws {
         let recorder = BandDiagnosticsRecorder(capacity: 64)
         let session = BandSessionMachine(diagnostics: recorder)
-        let generation = try await session.beginScan()
+        let scanToken = try await session.beginScan()
+        let generation = scanToken.generation
         let connectionToken = try await session.selectCandidate(
             VirtualBandFixtures.candidate,
-            callbackGeneration: generation
+            callbackGeneration: scanToken
         )
         try await session.beginConnection(
             token: connectionToken,
@@ -2313,10 +2355,11 @@ struct BandSessionMachineTests {
         BandConnectionToken
     ) {
         let session = BandSessionMachine(diagnostics: diagnostics)
-        let generation = try await session.beginScan()
+        let scanToken = try await session.beginScan()
+        let generation = scanToken.generation
         let connectionToken = try await session.selectCandidate(
             VirtualBandFixtures.candidate,
-            callbackGeneration: generation
+            callbackGeneration: scanToken
         )
         try await session.beginConnection(
             token: connectionToken,
@@ -2377,10 +2420,11 @@ struct BandSessionMachineTests {
         BandConnectionToken
     ) {
         let session = BandSessionMachine(diagnostics: diagnostics)
-        let generation = try await session.beginScan()
+        let scanToken = try await session.beginScan()
+        let generation = scanToken.generation
         let connectionToken = try await session.selectCandidate(
             VirtualBandFixtures.candidate,
-            callbackGeneration: generation
+            callbackGeneration: scanToken
         )
         try await session.beginConnection(
             token: connectionToken,

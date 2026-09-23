@@ -65,7 +65,8 @@ The production adapter must preserve these distinct authorities:
    collector lease. This is application/cloud authorization, not BLE trust.
 2. The phone scans for supplier candidates and exposes only an opaque handle to
    the neutral SDK. Device names, addresses, serials, and advertisements do not
-   enter diagnostics.
+   enter diagnostics. Selection, cancellation, and failure callbacks return the
+   opaque scan token issued by that exact neutral session.
 3. The supplier transport performs the approved identify/possession challenge.
    The exact vibration, tap, printed-label, or challenge-response behavior is
    unavailable until the reviewed firmware and supplier SDK define it.

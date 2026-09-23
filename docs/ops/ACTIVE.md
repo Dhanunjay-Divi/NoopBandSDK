@@ -4,17 +4,16 @@ Last updated: **2026-09-23**
 
 ## Current round
 
-- [PR 17 exact review remediation](rounds/2026-09-22-pr17-exact-review-remediation.md)
+- [Application PR 17 exact-head remediation](rounds/2026-09-23-app-pr17-exact-head-remediation.md)
 
 ## Current boundary
 
-- Integration branch: `codex/sdk-pr17-exact-review-remediation-20260922`
+- Integration branch: `codex/sdk-pr22-review-remediation-20260923`
 - GitHub branch protection: absent as of 2026-09-22; PR-only discipline is
   procedural, not enforced by a repository rule
-- Active branch: `codex/sdk-pr17-exact-review-remediation-20260922`
-- Start commit: `9bc2eedce34c61d49f68001a973fbbda793d04ed`
-- Implementation commit:
-  `c0652fd89a9cb248617e578c6cd8498960c8c302`
+- Active branch: `codex/sdk-pr22-review-remediation-20260923`
+- Start commit: `a9d3f1a2a55b5436bf1b65b0299a27667241afa4`
+- Implementation commit: pending
 - PR merge: pending
 - Supplier binaries: absent and prohibited
 - WHOOP application transport: unchanged
@@ -82,6 +81,13 @@ possession proof, firmware flashing, or OTA behavior.
   Swift invalidates callback authority before its first diagnostics suspension
   so no staged live/history acceptance can be cleared without a durable
   receipt.
+- SDK PR `#21` merged those corrections at `a9d3f1a2`. The NOOP application
+  exact-head review then identified three narrower deterministic defects:
+  hostile Kotlin set traversal is bounded by unique cardinality rather than
+  iterator steps, discovery callbacks use a generation that can collide across
+  replacement session objects, and history can start without any negotiated
+  history stream. The active round corrects those contracts before the
+  application artifact is repinned.
 
 ## Current evidence
 
@@ -158,6 +164,17 @@ possession proof, firmware flashing, or OTA behavior.
     The invalidated phase now remains visible to close, both platforms require
     the live-collecting state before stop, and final corrected exact-diff
     review reports no remaining P0-P2 finding.
+- Current application-PR-17 exact-head remediation verification:
+  - Swift package: 62/62 passed after the reflection-redaction regression.
+  - Kotlin/JVM tests and `installDist`: passed.
+  - Shared conformance: 41/41 exact results matched.
+  - Repository gate: 58 files passed.
+  - JSON, bounded secret-pattern, and diff checks: passed.
+  - The first independent review found three P2 issues in token rendering,
+    per-callback scenario evidence, and operations wording. The corrected-diff
+    review found one remaining P2 reflection path plus two stale evidence
+    statements. All are corrected; final exact-diff re-review reports no
+    remaining P0-P2 issue.
 
 ## Next ordered actions
 

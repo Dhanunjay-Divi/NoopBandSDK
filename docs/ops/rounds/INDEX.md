@@ -1,5 +1,6 @@
 # NOOP Band SDK operations rounds
 
+- [2026-09-23 - Application PR 17 exact-head remediation](2026-09-23-app-pr17-exact-head-remediation.md)
 - [2026-09-22 - PR 17 exact review remediation](2026-09-22-pr17-exact-review-remediation.md)
 - [2026-09-22 - Late capability state preservation](2026-09-22-late-capability-state-preservation.md)
 - [2026-09-22 - Conformance order contract](2026-09-22-conformance-order-contract.md)
