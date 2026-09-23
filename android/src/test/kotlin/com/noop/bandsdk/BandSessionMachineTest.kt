@@ -59,6 +59,17 @@ class BandSessionMachineTest {
         }
     }
 
+    private class SizeFailureList<T> : AbstractList<T>() {
+        override val size: Int
+            get() = throw ConcurrentModificationException()
+
+        override fun get(index: Int): T =
+            error("size failure must reject before indexed access")
+
+        override fun iterator(): Iterator<T> =
+            error("size failure must reject before iteration")
+    }
+
     private class IterationForbiddenSet<T>(
         override val size: Int,
     ) : AbstractSet<T>() {
@@ -193,6 +204,27 @@ class BandSessionMachineTest {
         assertNull(result.failure)
         assertEquals("cursor-3", result.acknowledgedCursor)
         assertEquals(1, result.acceptedSamples)
+    }
+
+    @Test
+    fun restoredCheckpointSurvivesAnInterveningSource() {
+        val result = BandConformanceRunner.run(
+            "history_checkpoint_survives_source_mismatch",
+        )
+        assertNull(result.failure)
+        assertEquals("cursor-2", result.acknowledgedCursor)
+        assertEquals(2, result.acceptedSamples)
+    }
+
+    @Test
+    fun gracefulDisconnectReturnsAReusableIdleSession() {
+        val result = BandConformanceRunner.run("graceful_disconnect_to_idle")
+        assertEquals(
+            BandFailureCategory.STALE_CALLBACK.wireValue,
+            result.failure,
+        )
+        assertEquals(BandSessionState.IDLE.wireValue, result.finalState)
+        assertTrue("session_reusable" in result.events)
     }
 
     @Test
@@ -1020,6 +1052,54 @@ class BandSessionMachineTest {
     }
 
     @Test
+    fun supplierListSizeFailuresAreNormalizedAndDiagnosed() {
+        val recorder = BandDiagnosticsRecorder()
+        val (session, generation) = readySession(recorder)
+        val liveToken = session.beginLive()
+        val liveError = assertFailsWith<BandException> {
+            session.stageLiveBatch(
+                VirtualBandFixtures.liveBatch.copy(
+                    samples = SizeFailureList(),
+                ),
+                liveToken,
+                generation,
+            )
+        }
+        assertEquals(BandFailureCategory.INVALID_INPUT, liveError.category)
+        assertEquals(
+            BandDiagnosticEvent(
+                BandDiagnosticKind.LIVE,
+                BandDiagnosticOutcome.REJECTED,
+                failureCategory = BandFailureCategory.INVALID_INPUT,
+            ),
+            recorder.snapshot().last(),
+        )
+        session.stopLive()
+
+        val historyToken =
+            session.beginOperation(BandOperationClass.HISTORY)
+        val historyError = assertFailsWith<BandException> {
+            session.stageHistoryChunk(
+                VirtualBandFixtures.historyChunk.copy(
+                    batches = SizeFailureList(),
+                ),
+                historyToken,
+                generation,
+            )
+        }
+        assertEquals(BandFailureCategory.INVALID_INPUT, historyError.category)
+        assertEquals(
+            BandDiagnosticEvent(
+                BandDiagnosticKind.HISTORY,
+                BandDiagnosticOutcome.REJECTED,
+                failureCategory = BandFailureCategory.INVALID_INPUT,
+            ),
+            recorder.snapshot().last(),
+        )
+        session.cancelOperation(historyToken)
+    }
+
+    @Test
     fun stepSamplesRequireIntegralCounts() {
         val identity = BandSampleIdentity(
             stream = BandStreamKind.STEPS,
@@ -1706,6 +1786,13 @@ class BandSessionMachineTest {
             liveSession.interruptForReconnect(liveGeneration)
         }
         assertEquals(BandFailureCategory.BUSY, reconnectFailure.category)
+        val disconnectFailure = assertFailsWith<BandException> {
+            liveSession.disconnect(
+                BandDisconnectReason.USER_PAUSED,
+                liveGeneration,
+            )
+        }
+        assertEquals(BandFailureCategory.BUSY, disconnectFailure.category)
         val closeFailure = assertFailsWith<BandException> {
             liveSession.close()
         }
@@ -1756,6 +1843,16 @@ class BandSessionMachineTest {
         assertEquals(
             BandFailureCategory.BUSY,
             historyReconnectFailure.category,
+        )
+        val historyDisconnectFailure = assertFailsWith<BandException> {
+            historySession.disconnect(
+                BandDisconnectReason.COLLECTOR_HANDOFF,
+                historyGeneration,
+            )
+        }
+        assertEquals(
+            BandFailureCategory.BUSY,
+            historyDisconnectFailure.category,
         )
         val historyCloseFailure = assertFailsWith<BandException> {
             historySession.close()

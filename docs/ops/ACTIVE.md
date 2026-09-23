@@ -1,20 +1,20 @@
 # Active NOOP Band SDK handoff
 
-Last updated: **2026-09-22**
+Last updated: **2026-09-23**
 
 ## Current round
 
-- [Late capability state preservation](rounds/2026-09-22-late-capability-state-preservation.md)
+- [PR 17 exact review remediation](rounds/2026-09-22-pr17-exact-review-remediation.md)
 
 ## Current boundary
 
-- Integration branch: `codex/sdk-late-capability-state-20260922`
+- Integration branch: `codex/sdk-pr17-exact-review-remediation-20260922`
 - GitHub branch protection: absent as of 2026-09-22; PR-only discipline is
   procedural, not enforced by a repository rule
-- Active branch: `codex/sdk-late-capability-state-20260922`
-- Start commit: `823930fa16d30ea7849a557823215c913a36fb8b`
+- Active branch: `codex/sdk-pr17-exact-review-remediation-20260922`
+- Start commit: `9bc2eedce34c61d49f68001a973fbbda793d04ed`
 - Implementation commit:
-  `03f37f4c3a7051c9ff1cb969d971c927bf5594ea`
+  `c0652fd89a9cb248617e578c6cd8498960c8c302`
 - PR merge: pending
 - Supplier binaries: absent and prohibited
 - WHOOP application transport: unchanged
@@ -71,6 +71,17 @@ possession proof, firmware flashing, or OTA behavior.
   move an already-ready session to `INCOMPATIBLE`. The active correction keeps
   initial negotiation fail-closed while preserving established session state
   and recording the same bounded invalid-input rejection for a late callback.
+- SDK PR `#20` merged that late-capability correction at `9bc2eedc`. The final
+  NOOP application PR `#17` review then confirmed four remaining deterministic
+  defects: hostile Kotlin `List.size` failure normalization, restored
+  checkpoint loss after a different source connected first, absence of a
+  graceful disconnect API, and stale release-control provenance.
+- The active SDK correction now preserves the source-scoped checkpoint,
+  normalizes hostile Kotlin list-size access, and implements matched
+  generation-fenced graceful disconnect with fixed bounded diagnostics.
+  Swift invalidates callback authority before its first diagnostics suspension
+  so no staged live/history acceptance can be cleared without a durable
+  receipt.
 
 ## Current evidence
 
@@ -134,14 +145,26 @@ possession proof, firmware flashing, or OTA behavior.
   - An independent sub-agent review was requested but no agent slot was
     available. No independent result is claimed; fresh PR review remains
     required before merge.
+- Current exact-review remediation verification:
+  - Swift package: 60/60 passed after the final tokenless-stop guard.
+  - Kotlin/JVM: 66/66 passed; `installDist` built successfully.
+  - Shared conformance: 40/40 exact results matched.
+  - Repository gate: 57 files passed.
+  - JSON, bounded secret-pattern, and diff checks: passed.
+  - The first independent review found one P1 Swift actor-reentrancy race
+    during disconnect. Callback authority now advances before suspension and
+    a direct staging-during-disconnect regression passes. Re-review then found
+    close-terminal evidence loss and a live-only `stopLive()` interruption.
+    The invalidated phase now remains visible to close, both platforms require
+    the live-collecting state before stop, and final corrected exact-diff
+    review reports no remaining P0-P2 finding.
 
 ## Next ordered actions
 
-1. Verify, commit, push once, and merge the late-capability correction
-   normally. Do not claim hosted checks: this repository intentionally has no
-   hosted workflow.
-2. Produce two byte-identical clean source exports from the merge.
+1. Commit and push once, then merge the SDK correction normally. Do not claim
+   hosted checks: this repository intentionally has no hosted workflow.
+2. Produce two byte-identical clean source exports from the exact merge.
 3. Repin NOOP application PR `#17`, compile exported support as a separate
    test target, rerun local artifact/app gates, push once, and require final
-   protected hosted checks.
+   protected hosted checks and review.
 4. Keep supplier and physical-device gates explicit and separate.
