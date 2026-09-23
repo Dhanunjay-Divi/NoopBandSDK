@@ -2,9 +2,9 @@
 
 ## Status
 
-- State: `locally verified; independent review complete; integration pending`
-- Branch: `codex/sdk-pr30-final-review-20260923`
-- Start commit: `38cf7de3b1c92dd30dad343af2adfa2cb61dea2e`
+- State: `locally verified; independent review corrected; integration pending`
+- Branch: `codex/sdk-pr31-review-closeout-20260923`
+- Start commit: `b027cbd9702936d4903f3293ca605650cdf5c413`
 - Supplier artifacts: absent and prohibited
 - Physical-device claims: unchanged and unproven
 
@@ -77,11 +77,53 @@ health value, or arbitrary exception text is recorded.
 
 ## Remaining ordered work
 
-1. Commit, push, and integrate the SDK through a normal pull request.
-2. Export the exact SDK merge twice and verify byte identity.
-3. Repin the NOOP application PR `#17`, rerun its local and hosted exact-head
+1. Close the post-integration review findings recorded below.
+2. Run the exact SDK verification wall and integrate through a normal pull
+   request.
+3. Export the exact SDK merge twice and verify byte identity.
+4. Repin the NOOP application PR `#17`, rerun its local and hosted exact-head
    gates, resolve reviewed threads, and integrate normally.
-4. Remove only round-owned logs, caches, exports, and clean worktrees.
+5. Remove only round-owned logs, caches, exports, and clean worktrees.
+
+## Post-integration review follow-up
+
+- SDK PR `#30` merged normally at
+  `b027cbd9702936d4903f3293ca605650cdf5c413` and was consumed by NOOP
+  application PR `#17`.
+- Confirmed P2: Apple clears `pendingHistory` before an awaited completion
+  diagnostic. A concurrent reconnect or close can then advance generation and
+  invalidate the operation while acknowledgement resumes and returns success
+  without revalidating authority.
+- Confirmed P2: Kotlin data-class descriptions and Swift public debug surfaces
+  exposed raw sample values, timestamps, cursors, acknowledgement tokens, and
+  source or device identity outside the bounded diagnostic recorder.
+- The follow-up must preserve the already durable checkpoint while keeping
+  lifecycle changes busy until acknowledgement completion is authority-checked.
+  Deterministic suspension tests must cover reconnect, close, and duplicate
+  acknowledgement during the diagnostic window.
+- Apple now retains `pendingHistory` through the awaited completion diagnostic,
+  rejects duplicate acknowledgement while completion is in flight, blocks
+  reconnect and close through the existing pending-persistence fence, and
+  revalidates generation, the exact history token, history state, and receipt
+  sequence before clearing pending authority.
+- Apple and Kotlin now render `BandIdentity`, sample identity, sample, sample
+  batch, history range, history chunk, history checkpoint, and session snapshot
+  as type names only. Swift also supplies redacted custom reflection so
+  `Mirror` and `dump` do not expose stored fields or the acknowledged cursor.
+- Dedicated Apple concurrency tests pass `4/4`; dedicated model-rendering tests
+  pass `2/2` on each platform. The complete Swift package passes `100/100`,
+  Kotlin/JVM passes `102/102` plus `installDist`, all `50/50` shared
+  conformance scenarios match, the `71`-file repository gate passes, and diff
+  hygiene is clean. Heavy commands used capped private logs under
+  `/tmp/sdk-pr31-*`.
+- Independent exact-diff review found no P0/P1 and two P2 gaps. The final
+  correction adds the public session snapshot to the type-only/redacted
+  reflection contract so its acknowledged cursor cannot escape, and removes
+  obsolete capability-equivalence branch metadata from the active handoff.
+  The complete Swift, Kotlin, conformance, repository, and diff gates all pass
+  again after those corrections.
+- No replacement artifact is published yet. Normal SDK integration, clean
+  export, and application repin remain.
 
 ## External gates
 

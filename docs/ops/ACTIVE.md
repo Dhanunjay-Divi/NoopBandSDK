@@ -17,45 +17,35 @@ Last updated: **2026-09-23**
 
 ## Current boundary
 
-- Application PR `#17` final review closeout is locally green on branch
-  `codex/sdk-pr30-final-review-20260923` from protected SDK main
-  `38cf7de3`. Apple capability completion now revalidates exact authority after
+- Application PR `#17` final review closeout merged through SDK PR `#30` at
+  `b027cbd9702936d4903f3293ca605650cdf5c413`. A post-integration follow-up is
+  active on branch `codex/sdk-pr31-review-closeout-20260923`. Apple capability
+  completion now revalidates exact authority after
   its diagnostic suspension, both platforms terminate an active live
   diagnostic before an established authentication/security terminal, and
   a direct Android regression proves the existing non-returning capability
   rejection preserves `INCOMPATIBLE` during initial negotiation. Exact-current
-  evidence passes Swift `94/94`,
+  baseline evidence passes Swift `94/94`,
   Kotlin/JVM tests plus `installDist`, shared conformance `50/50`, and the
   `68`-file repository gate. Independent review found no P0/P1 and its three
-  P2 regression gaps are closed. Normal SDK integration, clean export,
-  application repin, hosted exact-head checks, and protected app integration
-  remain.
-- Integration branch: `codex/sdk-capability-equivalence-20260923`
+  P2 regression gaps were closed before that merge. Later application review
+  confirmed one Apple history-acknowledgement authority race across an awaited
+  diagnostic and one cross-platform model-rendering privacy defect. The local
+  follow-up retains pending history authority through completion, revalidates
+  exact session and receipt authority after suspension, and redacts direct and
+  reflective rendering for all public identity/sample/history payload models.
+  Dedicated concurrency passes `4/4`; model rendering passes `2/2` per
+  platform; complete Swift passes `100/100`; Kotlin/JVM passes `102/102` plus
+  `installDist`; shared conformance `50/50`, the `71`-file repository gate,
+  and diff hygiene pass. Independent exact-diff review found no P0/P1 and two
+  P2 gaps: the session snapshot also needed cursor-safe rendering, and obsolete
+  active-branch metadata contradicted this round. Both are corrected and the
+  complete gates pass again. Normal SDK integration, clean export, application
+  repin, hosted exact-head checks, and protected app integration remain.
 - GitHub branch protection: absent as of 2026-09-22; PR-only discipline is
   procedural, not enforced by a repository rule
-- Active branch: `codex/sdk-capability-equivalence-20260923`
-- Start commit: `f8185b753b9e3672e78c7f3ee7596aeae7d53234`
-- Protected source through pull request `#28` is merged at `f8185b75`.
-- The application source-artifact consumer exposed an order-sensitive
-  capability-report equality defect after schema 3. Swift now uses exact UTF-8
-  identity for report fields, stream revisions, band identity, source
-  identities, cursors, receipt tokens, and runtime parser/calibration checks.
-  Both platforms compare stream semantics as multiplicity-preserving frequency
-  maps independent of array order; Kotlin hash code follows the same
-  equivalence. Initial and corrective review found no P0/P1 and four P2 parity
-  defects in total; all four are corrected with matched regressions. A final
-  source audit additionally replaced synthesized Swift `BandIdentity`
-  equality. Complete-delta review found three further P2 gaps: unbounded
-  late-report equality, synthesized Swift equality in public history/sample
-  models, and missing runtime opaque-string regressions. The final correction
-  keeps equality lawful while validating bounded semantics cardinality,
-  caller-owned traversal, and UTF-8 lengths before session equality; it adds
-  exact Swift model equality and matched source/checkpoint/cursor/receipt
-  regressions. Exact-current re-review reports no P0-P2 finding. The Swift
-  package passes 91/91, Kotlin/JVM passes 99/99 plus `installDist`, shared
-  conformance passes 50/50, the repository gate passes 67 files, and JSON/diff
-  hygiene is green. Commit, normal pull-request integration, clean export, and
-  application repin remain.
+- Historical capability-equivalence evidence remains in its dedicated round
+  and is not an active integration boundary.
 - Supplier binaries: absent and prohibited
 - WHOOP application transport: unchanged
 - Production supplier adapter: unavailable pending approved artifacts and
