@@ -1613,24 +1613,46 @@ public actor BandSessionMachine {
         return reconnectGeneration
     }
 
+    @discardableResult
     public func resumeAfterReconnect(
         callbackGeneration: UInt64
-    ) async throws {
+    ) async throws -> BandConnectionToken {
         try ensureNotClosed()
         try await validateCallbackGeneration(
             callbackGeneration,
             diagnosticKind: .reconnect
         )
         guard state == .recovering,
-              identity != nil,
+              let identity,
               capabilityReport != nil
         else {
             throw BandFailureCategory.invalidState
         }
+        nextConnectionSequence &+= 1
+        let token = BandConnectionToken(
+            sessionNonce: sessionNonce,
+            generation: generation,
+            sequence: nextConnectionSequence,
+            candidateHandle: identity.sourceIdentity
+        )
+        activeConnectionToken = token
         state = .ready
         await diagnostics.record(
             BandDiagnosticEvent(kind: .reconnect, outcome: .completed)
         )
+        guard generation == token.generation,
+              activeConnectionToken == token
+        else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .reconnect,
+                    outcome: .stale,
+                    failureCategory: .staleCallback
+                )
+            )
+            throw BandFailureCategory.staleCallback
+        }
+        return token
     }
 
     @discardableResult

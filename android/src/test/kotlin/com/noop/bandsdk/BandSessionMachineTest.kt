@@ -1611,6 +1611,32 @@ class BandSessionMachineTest {
     }
 
     @Test
+    fun reconnectIssuesNewConnectionToken() {
+        val (session, generation, originalToken) = readySessionWithToken()
+        val reconnectGeneration =
+            session.interruptForReconnect(generation)
+        val reconnectToken =
+            session.resumeAfterReconnect(reconnectGeneration)
+
+        val stale = assertFailsWith<BandException> {
+            session.failEstablishedSession(
+                BandFailureCategory.AUTHENTICATION,
+                originalToken,
+                reconnectGeneration,
+            )
+        }
+        assertEquals(BandFailureCategory.STALE_CALLBACK, stale.category)
+        assertEquals(BandSessionState.READY, session.snapshot().state)
+
+        session.failEstablishedSession(
+            BandFailureCategory.AUTHENTICATION,
+            reconnectToken,
+            reconnectGeneration,
+        )
+        assertEquals(BandSessionState.REJECTED, session.snapshot().state)
+    }
+
+    @Test
     fun establishedFailureWaitsForPendingLiveReceipt() {
         val recorder = BandDiagnosticsRecorder()
         val (session, generation, connectionToken) =

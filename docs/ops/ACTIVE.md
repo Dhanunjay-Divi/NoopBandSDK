@@ -214,21 +214,28 @@ possession proof, firmware flashing, or OTA behavior.
   - commit, PR, merge, deterministic export, and application repin remain
     pending.
 - Current established-session authority correction:
-  - Swift package passes 67/67 tests;
+  - Swift package passes 69/69 tests;
   - Kotlin/JVM tests and `installDist` pass;
-  - shared conformance passes 44/44 ordered scenarios;
+  - shared conformance passes 45/45 ordered scenarios;
   - repository policy passes 61 files;
   - JSON parsing, bounded secret-pattern review, and diff hygiene pass;
   - the first conformance invocation detected stale pre-change executables;
     both binaries were rebuilt and the required rerun passed all 44 scenarios;
-  - independent exact-diff review, commit, PR, merge, deterministic exports,
-    and application repin remain pending.
+  - initial independent review found that reconnect did not issue replacement
+    connection authority; both platforms now return a fresh token and the
+    retired token remains stale;
+  - focused re-review found a Swift actor-reentrancy path that could make the
+    replacement token inaccessible after a concurrent live start; the
+    post-suspension guard now preserves exact token authority and the direct
+    suspended-record regression passes;
+  - final exact-diff re-review reports no remaining P0-P2 finding;
+  - publication commit, PR, merge, deterministic exports, and application
+    repin remain pending.
 
 ## Next ordered actions
 
-1. Complete independent exact-diff review, then commit and push once and merge
-   the SDK correction normally. Do not claim hosted checks: this repository
-   intentionally has no hosted workflow.
+1. Commit and push once, then merge the SDK correction normally. Do not claim
+   hosted checks: this repository intentionally has no hosted workflow.
 2. Produce two byte-identical clean source exports from the exact merge.
 3. Repin NOOP application PR `#17`, compile exported support as a separate
    test target, rerun local artifact/app gates, push once, and require final

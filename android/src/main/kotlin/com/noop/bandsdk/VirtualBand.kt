@@ -217,6 +217,7 @@ object BandConformanceRunner {
         "scan_callback_consumed_after_selection",
         "cross_session_credentials_rejected",
         "established_failure_session_bound",
+        "reconnected_established_failure_authorized",
         "superseded_live_stop_rejected",
         "same_session_replay_rejected",
         "stale_terminal_callbacks_rejected",
@@ -267,6 +268,8 @@ object BandConformanceRunner {
             crossSessionCredentialsRejected()
         "established_failure_session_bound" ->
             establishedFailureSessionBound()
+        "reconnected_established_failure_authorized" ->
+            reconnectedEstablishedFailureAuthorized()
         "superseded_live_stop_rejected" ->
             supersededLiveStopRejected()
         "same_session_replay_rejected" ->
@@ -822,6 +825,50 @@ object BandConformanceRunner {
             "established_failure_session_bound",
             events,
             second.snapshot(),
+            failure = failure,
+        )
+    }
+
+    private fun reconnectedEstablishedFailureAuthorized():
+        BandConformanceResult {
+        val (session, generation, originalToken) = readySessionWithToken()
+        val events = mutableListOf("ready")
+        var failure: BandFailureCategory? = null
+
+        val reconnectGeneration =
+            session.interruptForReconnect(generation)
+        val reconnectToken =
+            session.resumeAfterReconnect(reconnectGeneration)
+        events += "reconnected"
+
+        try {
+            session.failEstablishedSession(
+                BandFailureCategory.AUTHENTICATION,
+                originalToken,
+                reconnectGeneration,
+            )
+        } catch (error: BandException) {
+            if (error.category != BandFailureCategory.STALE_CALLBACK) {
+                fail(BandFailureCategory.INTERNAL_FAILURE)
+            }
+            failure = error.category
+            events += "stale_previous_failure_rejected"
+        }
+
+        check(session.snapshot().state == BandSessionState.READY)
+        events += "resumed_session_preserved"
+
+        session.failEstablishedSession(
+            BandFailureCategory.AUTHENTICATION,
+            reconnectToken,
+            reconnectGeneration,
+        )
+        events += "resumed_failure_accepted"
+
+        return result(
+            "reconnected_established_failure_authorized",
+            events,
+            session.snapshot(),
             failure = failure,
         )
     }

@@ -265,6 +265,7 @@ public enum BandConformanceRunner {
         "scan_callback_consumed_after_selection",
         "cross_session_credentials_rejected",
         "established_failure_session_bound",
+        "reconnected_established_failure_authorized",
         "superseded_live_stop_rejected",
         "same_session_replay_rejected",
         "stale_terminal_callbacks_rejected",
@@ -320,6 +321,8 @@ public enum BandConformanceRunner {
             return try await crossSessionCredentialsRejected()
         case "established_failure_session_bound":
             return try await establishedFailureSessionBound()
+        case "reconnected_established_failure_authorized":
+            return try await reconnectedEstablishedFailureAuthorized()
         case "superseded_live_stop_rejected":
             return try await supersededLiveStopRejected()
         case "same_session_replay_rejected":
@@ -934,6 +937,56 @@ public enum BandConformanceRunner {
             scenario: "established_failure_session_bound",
             events: events,
             snapshot: await second.snapshot(),
+            failure: failure
+        )
+    }
+
+    private static func reconnectedEstablishedFailureAuthorized()
+        async throws -> BandConformanceResult
+    {
+        let (session, generation, originalToken) =
+            try await readySessionWithToken()
+        var events = ["ready"]
+        var failure: BandFailureCategory?
+
+        let reconnectGeneration = try await session.interruptForReconnect(
+            callbackGeneration: generation
+        )
+        let reconnectToken = try await session.resumeAfterReconnect(
+            callbackGeneration: reconnectGeneration
+        )
+        events.append("reconnected")
+
+        do {
+            try await session.failEstablishedSession(
+                .authentication,
+                token: originalToken,
+                callbackGeneration: reconnectGeneration
+            )
+        } catch let error as BandFailureCategory {
+            guard error == .staleCallback else {
+                throw BandFailureCategory.internalFailure
+            }
+            failure = error
+            events.append("stale_previous_failure_rejected")
+        }
+
+        guard await session.snapshot().state == .ready else {
+            throw BandFailureCategory.internalFailure
+        }
+        events.append("resumed_session_preserved")
+
+        try await session.failEstablishedSession(
+            .authentication,
+            token: reconnectToken,
+            callbackGeneration: reconnectGeneration
+        )
+        events.append("resumed_failure_accepted")
+
+        return result(
+            scenario: "reconnected_established_failure_authorized",
+            events: events,
+            snapshot: await session.snapshot(),
             failure: failure
         )
     }

@@ -125,6 +125,23 @@
       }
     },
     {
+      "id": "reconnected_established_failure_authorized",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "reconnected",
+          "stale_previous_failure_rejected",
+          "resumed_session_preserved",
+          "resumed_failure_accepted"
+        ],
+        "finalState": "rejected",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "staleCallback"
+      }
+    },
+    {
       "id": "superseded_live_stop_rejected",
       "automated": true,
       "expected": {

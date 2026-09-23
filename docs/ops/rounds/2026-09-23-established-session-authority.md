@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `locally verified; independent review and publication pending`
+- State: `locally verified and independently reviewed; publication pending`
 - Branch: `codex/sdk-pr25-session-authority-20260923`
 - Start commit: `f20f4ed552328a64a8a598aaac72befa1d481262`
 - Implementation commit: pending publication
@@ -52,9 +52,17 @@ Those behaviors remain unchanged and their existing tests remain required.
   dump representations.
 - Kotlin connection and live tokens now use the same stable redacted rendering
   already used by operation tokens, acceptances, and receipts.
+- `resumeAfterReconnect` now issues a fresh connection token for the new
+  transport generation. The pre-reconnect token remains stale, while the
+  returned token can authorize later authentication or security failure
+  callbacks.
+- Swift revalidates the replacement token after diagnostic suspension without
+  requiring the session to remain `.ready`; a legitimate concurrent live start
+  therefore cannot make the reconnect token inaccessible to its caller.
 - The portable contract adds `established_failure_session_bound` and
-  `superseded_live_stop_rejected`, bringing the automated cross-platform
-  scenario count to 44.
+  `superseded_live_stop_rejected`, plus
+  `reconnected_established_failure_authorized`, bringing the automated
+  cross-platform scenario count to 45.
 
 ## Safety and observability
 
@@ -78,10 +86,10 @@ private receipt state and accepted health samples.
 
 ## Verification evidence
 
-- `swift test --package-path apple --jobs 1`: 67/67 tests passed.
+- `swift test --package-path apple --jobs 1`: 69/69 tests passed.
 - Gradle `test installDist`: passed and the Kotlin conformance distribution
   built successfully.
-- `python3 scripts/run_conformance.py`: 44/44 ordered Swift/Kotlin scenarios
+- `python3 scripts/run_conformance.py`: 45/45 ordered Swift/Kotlin scenarios
   matched the checked-in contract.
 - `python3 scripts/check_repository.py`: 61 repository files passed language,
   binary, and JSON policy gates.
@@ -91,16 +99,24 @@ private receipt state and accepted health samples.
   failed before publishing a result. Both conformance executables were rebuilt
   from the candidate source; the required rerun then passed all 44 scenarios.
   No stale-binary result is counted as evidence.
+- Independent review found that reconnect originally cleared connection
+  authority without issuing a replacement. Both platforms now return a fresh
+  token, reject the retired token, and pass a shared reconnect scenario.
+- Focused re-review then found a Swift actor-reentrancy path where a concurrent
+  live start could make the valid replacement token inaccessible after the
+  reconnect diagnostic suspended. The post-suspension guard now validates
+  generation and exact token authority, and a direct suspended-record
+  regression passes.
+- Final exact-diff re-review reports no remaining P0-P2 finding.
 - Output remained in private bounded logs under `/tmp`; no raw health values,
   identifiers, callback credentials, or supplier payloads were added to
   diagnostics.
 
 ## Remaining gates
 
-1. Complete independent exact-diff review with no unresolved P0-P2 finding.
-2. Commit, push once, open the pull request, and merge normally.
-3. Produce two byte-identical clean source exports from the exact merge.
-4. Repin NOOP application PR `#17`, rerun exported-source consumer and
+1. Commit, push once, open the pull request, and merge normally.
+2. Produce two byte-identical clean source exports from the exact merge.
+3. Repin NOOP application PR `#17`, rerun exported-source consumer and
    application gates, and complete its protected hosted review.
 
 ## External gates

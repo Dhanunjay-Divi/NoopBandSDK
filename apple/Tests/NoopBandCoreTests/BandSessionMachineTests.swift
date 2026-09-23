@@ -1238,6 +1238,66 @@ struct BandSessionMachineTests {
         #expect(await second.snapshot().state == .rejected)
     }
 
+    @Test("Reconnect issues new established-session authority")
+    func reconnectIssuesNewConnectionToken() async throws {
+        let (session, generation, originalToken) =
+            try await readySessionWithToken()
+        let reconnectGeneration = try await session.interruptForReconnect(
+            callbackGeneration: generation
+        )
+        let reconnectToken = try await session.resumeAfterReconnect(
+            callbackGeneration: reconnectGeneration
+        )
+
+        await #expect(throws: BandFailureCategory.staleCallback) {
+            try await session.failEstablishedSession(
+                .authentication,
+                token: originalToken,
+                callbackGeneration: reconnectGeneration
+            )
+        }
+        #expect(await session.snapshot().state == .ready)
+
+        try await session.failEstablishedSession(
+            .authentication,
+            token: reconnectToken,
+            callbackGeneration: reconnectGeneration
+        )
+        #expect(await session.snapshot().state == .rejected)
+    }
+
+    @Test("Reconnect token survives live start during diagnostics")
+    func reconnectTokenSurvivesLiveStartDuringDiagnostics() async throws {
+        let recorder = BandDiagnosticsRecorder(capacity: 64)
+        let (session, generation, _) = try await readySessionWithToken(
+            diagnostics: recorder
+        )
+        let reconnectGeneration = try await session.interruptForReconnect(
+            callbackGeneration: generation
+        )
+        await recorder.requestNextRecordSuspensionForTesting()
+
+        let resumeTask = Task {
+            try await session.resumeAfterReconnect(
+                callbackGeneration: reconnectGeneration
+            )
+        }
+        await recorder.waitForRecordSuspensionForTesting()
+        _ = try await session.beginLive()
+        #expect(await session.snapshot().state == .liveCollecting)
+
+        await recorder.resumeSuspendedRecordForTesting()
+        let reconnectToken = try await resumeTask.value
+        try await session.failEstablishedSession(
+            .authentication,
+            token: reconnectToken,
+            callbackGeneration: reconnectGeneration
+        )
+        let rejected = await session.snapshot()
+        #expect(rejected.state == .rejected)
+        #expect(!rejected.liveActive)
+    }
+
     @Test("Established failure waits for a pending live receipt")
     func establishedFailureWaitsForPendingLiveReceipt() async throws {
         let recorder = BandDiagnosticsRecorder()
