@@ -525,6 +525,21 @@ class BandSessionMachine(
             traversalFence,
             BandDiagnosticKind.CAPABILITY,
         )
+        try {
+            immutableReport.validate()
+        } catch (_: BandException) {
+            if (state == BandSessionState.NEGOTIATING_CAPABILITIES) {
+                rejectCapabilities(mutateSession = true)
+            }
+            diagnostics.record(
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.CAPABILITY,
+                    BandDiagnosticOutcome.REJECTED,
+                    failureCategory = BandFailureCategory.INVALID_INPUT,
+                ),
+            )
+            fail(BandFailureCategory.INVALID_INPUT)
+        }
         val currentIdentity = identity
         val identityMatches =
             currentIdentity?.hardwareRevision == immutableReport.hardwareRevision &&
@@ -545,11 +560,6 @@ class BandSessionMachine(
         if (
             !identityMatches
         ) {
-            rejectCapabilities(mutateSession = true)
-        }
-        try {
-            immutableReport.validate()
-        } catch (_: BandException) {
             rejectCapabilities(mutateSession = true)
         }
         capabilityReport = immutableReport

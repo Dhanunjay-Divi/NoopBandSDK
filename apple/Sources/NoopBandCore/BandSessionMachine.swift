@@ -381,7 +381,9 @@ public actor BandSessionMachine {
         }
         if !restoredHistoryCheckpointConsumed,
            let restoredHistoryCheckpoint,
-           restoredHistoryCheckpoint.sourceIdentity == newIdentity.sourceIdentity
+           restoredHistoryCheckpoint.sourceIdentity.hasIdenticalUTF8(
+               to: newIdentity.sourceIdentity
+           )
         {
             do {
                 try restoredHistoryCheckpoint.validate()
@@ -404,7 +406,10 @@ public actor BandSessionMachine {
                 restoredHistoryCheckpoint.lastHistoryComplete
             durableSourceIdentity = newIdentity.sourceIdentity
             restoredHistoryCheckpointConsumed = true
-        } else if durableSourceIdentity != newIdentity.sourceIdentity {
+        } else if !optionalStringsHaveIdenticalUTF8(
+            durableSourceIdentity,
+            newIdentity.sourceIdentity
+        ) {
             clearDurableSampleIdentities()
             acknowledgedHistoryCursor = nil
             lastDurableHistoryComplete = nil
@@ -545,6 +550,30 @@ public actor BandSessionMachine {
             callbackGeneration,
             diagnosticKind: .capability
         )
+        do {
+            try report.validate()
+        } catch {
+            if state == .negotiatingCapabilities {
+                state = .incompatible
+                capabilityReport = nil
+                await diagnostics.record(
+                    BandDiagnosticEvent(
+                        kind: .capability,
+                        outcome: .rejected,
+                        failureCategory: .incompatible
+                    )
+                )
+                throw BandFailureCategory.incompatible
+            }
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .capability,
+                    outcome: .rejected,
+                    failureCategory: .invalidInput
+                )
+            )
+            throw BandFailureCategory.invalidInput
+        }
         if state != .negotiatingCapabilities {
             if capabilityReport == report {
                 await diagnostics.record(
@@ -562,25 +591,17 @@ public actor BandSessionMachine {
             throw BandFailureCategory.invalidState
         }
         guard state == .negotiatingCapabilities,
-              identity?.hardwareRevision == report.hardwareRevision,
-              identity?.firmwareVersion == report.firmwareVersion,
-              identity?.protocolVersion == report.protocolVersion
+              let identity,
+              identity.hardwareRevision.hasIdenticalUTF8(
+                  to: report.hardwareRevision
+              ),
+              identity.firmwareVersion.hasIdenticalUTF8(
+                  to: report.firmwareVersion
+              ),
+              identity.protocolVersion.hasIdenticalUTF8(
+                  to: report.protocolVersion
+              )
         else {
-            state = .incompatible
-            capabilityReport = nil
-            await diagnostics.record(
-                BandDiagnosticEvent(
-                    kind: .capability,
-                    outcome: .rejected,
-                    failureCategory: .incompatible
-                )
-            )
-            throw BandFailureCategory.incompatible
-        }
-
-        do {
-            try report.validate()
-        } catch {
             state = .incompatible
             capabilityReport = nil
             await diagnostics.record(
@@ -899,7 +920,9 @@ public actor BandSessionMachine {
             throw BandFailureCategory.invalidState
         }
         try await validateLiveToken(token)
-        guard batch.sourceIdentity == identity?.sourceIdentity else {
+        guard let sourceIdentity = identity?.sourceIdentity,
+              batch.sourceIdentity.hasIdenticalUTF8(to: sourceIdentity)
+        else {
             await diagnostics.record(
                 BandDiagnosticEvent(
                     kind: .live,
@@ -1278,7 +1301,10 @@ public actor BandSessionMachine {
         guard let capabilityReport else {
             throw BandFailureCategory.invalidState
         }
-        guard chunk.previousCursor == acknowledgedHistoryCursor else {
+        guard optionalStringsHaveIdenticalUTF8(
+            chunk.previousCursor,
+            acknowledgedHistoryCursor
+        ) else {
             await diagnostics.record(
                 BandDiagnosticEvent(
                     kind: .history,
@@ -1290,7 +1316,10 @@ public actor BandSessionMachine {
         }
         guard chunk.complete
             || (chunk.nextCursor != nil
-                && chunk.nextCursor != chunk.previousCursor)
+                && !optionalStringsHaveIdenticalUTF8(
+                    chunk.nextCursor,
+                    chunk.previousCursor
+                ))
         else {
             await diagnostics.record(
                 BandDiagnosticEvent(
@@ -1301,9 +1330,11 @@ public actor BandSessionMachine {
             )
             throw BandFailureCategory.historyStalled
         }
-        guard chunk.batches.allSatisfy({
-            $0.sourceIdentity == identity?.sourceIdentity
-        }) else {
+        guard let sourceIdentity = identity?.sourceIdentity,
+              chunk.batches.allSatisfy({
+                  $0.sourceIdentity.hasIdenticalUTF8(to: sourceIdentity)
+              })
+        else {
             await diagnostics.record(
                 BandDiagnosticEvent(
                     kind: .history,
@@ -1394,10 +1425,16 @@ public actor BandSessionMachine {
         guard let pendingHistory,
               receipt.receiptSequence
                 == pendingHistory.acceptance.receiptSequence,
-              receipt.chunkIdentity == pendingHistory.acceptance.chunkIdentity,
-              receipt.acknowledgementToken
-                == pendingHistory.acceptance.acknowledgementToken,
-              receipt.nextCursor == pendingHistory.acceptance.nextCursor,
+              receipt.chunkIdentity.hasIdenticalUTF8(
+                  to: pendingHistory.acceptance.chunkIdentity
+              ),
+              receipt.acknowledgementToken.hasIdenticalUTF8(
+                  to: pendingHistory.acceptance.acknowledgementToken
+              ),
+              optionalStringsHaveIdenticalUTF8(
+                  receipt.nextCursor,
+                  pendingHistory.acceptance.nextCursor
+              ),
               receipt.complete == pendingHistory.acceptance.complete,
               receipt.overflowed == pendingHistory.acceptance.overflowed,
               receipt.retainedRange
@@ -2359,9 +2396,12 @@ public actor BandSessionMachine {
                         $0.lane == batch.lane
                             && $0.stream == stream
                             && $0.unit == sample.unit
-                            && $0.parserRevision == batch.parserRevision
-                            && $0.calibrationRevision
-                                == batch.calibrationRevision
+                            && $0.parserRevision.hasIdenticalUTF8(
+                                to: batch.parserRevision
+                            )
+                            && $0.calibrationRevision.hasIdenticalUTF8(
+                                to: batch.calibrationRevision
+                            )
                     }
               })
         else {

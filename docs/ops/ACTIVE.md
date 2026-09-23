@@ -4,6 +4,7 @@ Last updated: **2026-09-23**
 
 ## Current round
 
+- [Capability report equivalence](rounds/2026-09-23-capability-report-equivalence.md)
 - [PR 17 final contract closeout](rounds/2026-09-23-pr17-final-contract-closeout.md)
 - [Kotlin public-entry reentry guard](rounds/2026-09-23-kotlin-public-entry-reentry-guard.md)
 - [PR 17 independent-review follow-up](rounds/2026-09-23-pr17-independent-review-followup.md)
@@ -15,42 +16,49 @@ Last updated: **2026-09-23**
 
 ## Current boundary
 
-- Integration branch: `codex/sdk-pr17-final-contract-closeout-20260923`
+- Integration branch: `codex/sdk-capability-equivalence-20260923`
 - GitHub branch protection: absent as of 2026-09-22; PR-only discipline is
   procedural, not enforced by a repository rule
-- Active branch: `codex/sdk-pr17-final-contract-closeout-20260923`
-- Start commit: `586a5c04bd3edbd445895a881c5d4faa78fb526e`
-- Reentry-guard implementation commit:
-  `a9b66a9042d95559d9c74e892d13898dc9d79c65`
-- Reviewed implementation commit:
-  `3831fb63ae336bd88982586fafc608adda6d6280`
-- Last hosted-reviewed implementation commit:
-  `b66ee30ef352c9317191118a7226869d17059465`
-- Protected source through pull request `#26` is merged at `eb5d6d4c`.
-- The current follow-up closes one remaining Kotlin monitor-reentrancy path
-  before the next source export. All 29 public synchronized entries now reject
-  nested caller-owned traversal before session mutation. Focused regressions,
-  Kotlin 86/86 plus `installDist`, Swift 75/75, 46 shared conformance
-  scenarios, the 64-file repository policy gate, JSON parsing, and diff
-  hygiene pass locally. Commit, normal pull-request integration, clean export,
-  and application repin remain.
+- Active branch: `codex/sdk-capability-equivalence-20260923`
+- Start commit: `f8185b753b9e3672e78c7f3ee7596aeae7d53234`
+- Protected source through pull request `#28` is merged at `f8185b75`.
+- The application source-artifact consumer exposed an order-sensitive
+  capability-report equality defect after schema 3. Swift now uses exact UTF-8
+  identity for report fields, stream revisions, band identity, source
+  identities, cursors, receipt tokens, and runtime parser/calibration checks.
+  Both platforms compare stream semantics as multiplicity-preserving frequency
+  maps independent of array order; Kotlin hash code follows the same
+  equivalence. Initial and corrective review found no P0/P1 and four P2 parity
+  defects in total; all four are corrected with matched regressions. A final
+  source audit additionally replaced synthesized Swift `BandIdentity`
+  equality. Complete-delta review found three further P2 gaps: unbounded
+  late-report equality, synthesized Swift equality in public history/sample
+  models, and missing runtime opaque-string regressions. The final correction
+  keeps equality lawful while validating bounded semantics cardinality,
+  caller-owned traversal, and UTF-8 lengths before session equality; it adds
+  exact Swift model equality and matched source/checkpoint/cursor/receipt
+  regressions. Exact-current re-review reports no P0-P2 finding. The Swift
+  package passes 91/91, Kotlin/JVM passes 99/99 plus `installDist`, shared
+  conformance passes 50/50, the repository gate passes 67 files, and JSON/diff
+  hygiene is green. Commit, normal pull-request integration, clean export, and
+  application repin remain.
 - Supplier binaries: absent and prohibited
 - WHOOP application transport: unchanged
 - Production supplier adapter: unavailable pending approved artifacts and
   physical evidence
 
-The active closeout introduces capability schema 3 with immutable stream
+The protected PR `#28` closeout introduced capability schema 3 with immutable stream
 semantics and report/parser/calibration provenance, negotiated live-operation
 policy, staged-before-persistence evidence, and operation/disconnect diagnostic
 metadata. Swift connection and live-persistence suspension boundaries are
 authority-fenced. Kotlin normalizes hostile/JVM-null supplier collections,
 retains the historical diagnostic JVM constructor, and has no schema-2
 compatibility constructor that can fabricate provenance. Current exact-source
-evidence is green: Swift `83/83`, Kotlin/JVM plus `installDist`, shared
+baseline evidence is green: Swift `83/83`, Kotlin/JVM plus `installDist`, shared
 conformance `50/50`, repository gate `66` files, JSON, and diff hygiene.
-Independent Apple and Android corrective-delta reviews report no P0-P2
-findings. Commit, normal pull-request integration, protected-source export,
-byte comparison, and application repin remain pending.
+Independent Apple and Android corrective-delta reviews reported no P0-P2
+findings before that merge. The current capability-equivalence correction has
+its own review and integration gates recorded above.
 
 This work proves deterministic neutral-core behavior only. It does not prove
 BLE, background execution, flash retention, haptics, battery, sensor accuracy,

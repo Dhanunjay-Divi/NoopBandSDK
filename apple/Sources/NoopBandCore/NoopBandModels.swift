@@ -19,7 +19,44 @@ private extension String {
         maximum: Int,
         allowEmpty: Bool = false
     ) -> Bool {
-        (allowEmpty || !isEmpty) && utf8.count <= maximum
+        guard maximum >= 0 else {
+            return false
+        }
+        var count = 0
+        for _ in utf8 {
+            if count == maximum {
+                return false
+            }
+            count += 1
+        }
+        return allowEmpty || count > 0
+    }
+
+    func hashUTF8(into hasher: inout Hasher) {
+        hasher.combine(utf8.count)
+        for byte in utf8 {
+            hasher.combine(byte)
+        }
+    }
+}
+
+extension String {
+    func hasIdenticalUTF8(to other: String) -> Bool {
+        utf8.elementsEqual(other.utf8)
+    }
+}
+
+func optionalStringsHaveIdenticalUTF8(
+    _ lhs: String?,
+    _ rhs: String?
+) -> Bool {
+    switch (lhs, rhs) {
+    case let (.some(lhs), .some(rhs)):
+        return lhs.hasIdenticalUTF8(to: rhs)
+    case (.none, .none):
+        return true
+    default:
+        return false
     }
 }
 
@@ -244,6 +281,38 @@ public struct BandStreamSemantics:
         self.calibrationRevision = calibrationRevision
     }
 
+    public static func == (
+        lhs: BandStreamSemantics,
+        rhs: BandStreamSemantics
+    ) -> Bool {
+        lhs.lane == rhs.lane
+            && lhs.stream == rhs.stream
+            && lhs.unit == rhs.unit
+            && lhs.cadence == rhs.cadence
+            && lhs.nominalIntervalMilliseconds
+                == rhs.nominalIntervalMilliseconds
+            && lhs.quality == rhs.quality
+            && lhs.timestamp == rhs.timestamp
+            && lhs.parserRevision.hasIdenticalUTF8(
+                to: rhs.parserRevision
+            )
+            && lhs.calibrationRevision.hasIdenticalUTF8(
+                to: rhs.calibrationRevision
+            )
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(lane)
+        hasher.combine(stream)
+        hasher.combine(unit)
+        hasher.combine(cadence)
+        hasher.combine(nominalIntervalMilliseconds)
+        hasher.combine(quality)
+        hasher.combine(timestamp)
+        parserRevision.hashUTF8(into: &hasher)
+        calibrationRevision.hashUTF8(into: &hasher)
+    }
+
     public func validate() throws {
         let cadenceIsValid: Bool
         switch cadence {
@@ -423,6 +492,25 @@ public struct BandIdentity: Equatable, Sendable {
         self.wrapperRevision = wrapperRevision
     }
 
+    public static func == (
+        lhs: BandIdentity,
+        rhs: BandIdentity
+    ) -> Bool {
+        lhs.sourceIdentity.hasIdenticalUTF8(to: rhs.sourceIdentity)
+            && lhs.hardwareRevision.hasIdenticalUTF8(
+                to: rhs.hardwareRevision
+            )
+            && lhs.firmwareVersion.hasIdenticalUTF8(
+                to: rhs.firmwareVersion
+            )
+            && lhs.protocolVersion.hasIdenticalUTF8(
+                to: rhs.protocolVersion
+            )
+            && lhs.wrapperRevision.hasIdenticalUTF8(
+                to: rhs.wrapperRevision
+            )
+    }
+
     public func validate() throws {
         guard sourceIdentity.hasValidUTF8Length(
                   maximum: BandContractLimits.sourceIdentityLength
@@ -442,6 +530,9 @@ public struct BandIdentity: Equatable, Sendable {
 }
 
 public struct BandCapabilityReport: Equatable, Codable, Sendable {
+    static let maximumStreamSemantics =
+        BandStreamKind.allCases.count * 2
+
     public static let supportedSchemaVersion = 3
     public static let supportedProtocolVersion = "noop-band-v1"
 
@@ -483,6 +574,41 @@ public struct BandCapabilityReport: Equatable, Codable, Sendable {
         self.streamSemantics = streamSemantics
     }
 
+    public static func == (
+        lhs: BandCapabilityReport,
+        rhs: BandCapabilityReport
+    ) -> Bool {
+        lhs.schemaVersion == rhs.schemaVersion
+            && lhs.reportRevision.hasIdenticalUTF8(
+                to: rhs.reportRevision
+            )
+            && lhs.protocolVersion.hasIdenticalUTF8(
+                to: rhs.protocolVersion
+            )
+            && lhs.hardwareRevision.hasIdenticalUTF8(
+                to: rhs.hardwareRevision
+            )
+            && lhs.firmwareVersion.hasIdenticalUTF8(
+                to: rhs.firmwareVersion
+            )
+            && lhs.historyDays == rhs.historyDays
+            && lhs.capabilities == rhs.capabilities
+            && lhs.liveStreams == rhs.liveStreams
+            && lhs.historyStreams == rhs.historyStreams
+            && lhs.operationsAllowedDuringLive
+                == rhs.operationsAllowedDuringLive
+            && Self.semanticFrequencies(lhs.streamSemantics)
+                == Self.semanticFrequencies(rhs.streamSemantics)
+    }
+
+    private static func semanticFrequencies(
+        _ semantics: [BandStreamSemantics]
+    ) -> [BandStreamSemantics: Int] {
+        semantics.reduce(into: [:]) { frequencies, semantic in
+            frequencies[semantic, default: 0] += 1
+        }
+    }
+
     init(
         schemaVersion: Int,
         protocolVersion: String,
@@ -514,6 +640,9 @@ public struct BandCapabilityReport: Equatable, Codable, Sendable {
     }
 
     public func validate() throws {
+        guard streamSemantics.count <= Self.maximumStreamSemantics else {
+            throw BandFailureCategory.incompatible
+        }
         let expectedSemantics = Set(
             liveStreams.map {
                 BandStreamSemanticKey(lane: .live, stream: $0)
@@ -705,6 +834,21 @@ public struct BandSampleBatch: Equatable, Codable, Sendable {
         self.samples = samples
     }
 
+    public static func == (
+        lhs: BandSampleBatch,
+        rhs: BandSampleBatch
+    ) -> Bool {
+        lhs.sourceIdentity.hasIdenticalUTF8(to: rhs.sourceIdentity)
+            && lhs.lane == rhs.lane
+            && lhs.parserRevision.hasIdenticalUTF8(
+                to: rhs.parserRevision
+            )
+            && lhs.calibrationRevision.hasIdenticalUTF8(
+                to: rhs.calibrationRevision
+            )
+            && lhs.samples == rhs.samples
+    }
+
     public func validate(expectedLane: BandProvenanceLane) throws {
         guard lane == expectedLane,
               sourceIdentity.hasValidUTF8Length(
@@ -780,6 +924,29 @@ public struct BandHistoryChunk: Equatable, Codable, Sendable {
         self.batches = batches
     }
 
+    public static func == (
+        lhs: BandHistoryChunk,
+        rhs: BandHistoryChunk
+    ) -> Bool {
+        lhs.chunkIdentity.hasIdenticalUTF8(to: rhs.chunkIdentity)
+            && optionalStringsHaveIdenticalUTF8(
+                lhs.previousCursor,
+                rhs.previousCursor
+            )
+            && optionalStringsHaveIdenticalUTF8(
+                lhs.nextCursor,
+                rhs.nextCursor
+            )
+            && lhs.complete == rhs.complete
+            && lhs.overflowed == rhs.overflowed
+            && lhs.retainedRange == rhs.retainedRange
+            && lhs.firstLostRange == rhs.firstLostRange
+            && lhs.acknowledgementToken.hasIdenticalUTF8(
+                to: rhs.acknowledgementToken
+            )
+            && lhs.batches == rhs.batches
+    }
+
     public func validate() throws {
         guard chunkIdentity.hasValidUTF8Length(
                   maximum: BandContractLimits.opaqueHandleLength
@@ -850,6 +1017,20 @@ public struct BandHistoryCheckpoint: Equatable, Sendable {
         self.acknowledgedCursor = acknowledgedCursor
         self.lastHistoryComplete = lastHistoryComplete
         self.durableSampleIdentities = durableSampleIdentities
+    }
+
+    public static func == (
+        lhs: BandHistoryCheckpoint,
+        rhs: BandHistoryCheckpoint
+    ) -> Bool {
+        lhs.sourceIdentity.hasIdenticalUTF8(to: rhs.sourceIdentity)
+            && optionalStringsHaveIdenticalUTF8(
+                lhs.acknowledgedCursor,
+                rhs.acknowledgedCursor
+            )
+            && lhs.lastHistoryComplete == rhs.lastHistoryComplete
+            && lhs.durableSampleIdentities
+                == rhs.durableSampleIdentities
     }
 
     public func validate() throws {
@@ -1143,5 +1324,20 @@ public struct BandSessionSnapshot: Equatable, Sendable {
         self.liveActive = liveActive
         self.acknowledgedHistoryCursor = acknowledgedHistoryCursor
         self.durableSampleCount = durableSampleCount
+    }
+
+    public static func == (
+        lhs: BandSessionSnapshot,
+        rhs: BandSessionSnapshot
+    ) -> Bool {
+        lhs.state == rhs.state
+            && lhs.generation == rhs.generation
+            && lhs.activeOperation == rhs.activeOperation
+            && lhs.liveActive == rhs.liveActive
+            && optionalStringsHaveIdenticalUTF8(
+                lhs.acknowledgedHistoryCursor,
+                rhs.acknowledgedHistoryCursor
+            )
+            && lhs.durableSampleCount == rhs.durableSampleCount
     }
 }

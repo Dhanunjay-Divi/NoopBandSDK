@@ -328,6 +328,41 @@ data class BandCapabilityReport(
     val operationsAllowedDuringLive: Set<BandOperationClass>,
     val streamSemantics: List<BandStreamSemantics>,
 ) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is BandCapabilityReport) return false
+        return schemaVersion == other.schemaVersion &&
+            reportRevision == other.reportRevision &&
+            protocolVersion == other.protocolVersion &&
+            hardwareRevision == other.hardwareRevision &&
+            firmwareVersion == other.firmwareVersion &&
+            historyDays == other.historyDays &&
+            capabilities == other.capabilities &&
+            liveStreams == other.liveStreams &&
+            historyStreams == other.historyStreams &&
+            operationsAllowedDuringLive == other.operationsAllowedDuringLive &&
+            streamSemanticFrequencies() ==
+                other.streamSemanticFrequencies()
+    }
+
+    override fun hashCode(): Int {
+        var result = schemaVersion
+        result = 31 * result + reportRevision.hashCode()
+        result = 31 * result + protocolVersion.hashCode()
+        result = 31 * result + hardwareRevision.hashCode()
+        result = 31 * result + firmwareVersion.hashCode()
+        result = 31 * result + historyDays
+        result = 31 * result + capabilities.hashCode()
+        result = 31 * result + liveStreams.hashCode()
+        result = 31 * result + historyStreams.hashCode()
+        result = 31 * result + operationsAllowedDuringLive.hashCode()
+        result = 31 * result + streamSemanticFrequencies().hashCode()
+        return result
+    }
+
+    private fun streamSemanticFrequencies(): Map<BandStreamSemantics, Int> =
+        streamSemantics.groupingBy { it }.eachCount()
+
     fun validate() {
         val expectedSemantics =
             liveStreams.map { BandStreamSemanticKey(BandProvenanceLane.LIVE, it) } +
@@ -383,6 +418,8 @@ data class BandCapabilityReport(
     companion object {
         const val SUPPORTED_SCHEMA_VERSION = 3
         const val SUPPORTED_PROTOCOL_VERSION = "noop-band-v1"
+        internal val MAXIMUM_STREAM_SEMANTICS =
+            BandStreamKind.entries.size * BandProvenanceLane.entries.size
 
         internal fun virtualStreamSemantics(
             liveStreams: Set<BandStreamKind>,
