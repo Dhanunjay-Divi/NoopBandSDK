@@ -346,6 +346,25 @@ class BandSessionMachineTest {
     }
 
     @Test
+    fun scanTokenRequiresExactIssuedObject() {
+        val session = BandSessionMachine()
+        val issued = session.beginScan()
+        val forged = BandScanToken(
+            sessionNonce = issued.sessionNonce,
+            generation = issued.generation,
+        )
+
+        val error = assertFailsWith<BandException> {
+            session.cancelScan(forged)
+        }
+        assertEquals(BandFailureCategory.STALE_CALLBACK, error.category)
+        assertEquals(BandSessionState.SCANNING, session.snapshot().state)
+
+        session.cancelScan(issued)
+        assertEquals(BandSessionState.IDLE, session.snapshot().state)
+    }
+
+    @Test
     fun receiptsAndTokensAreSessionBound() {
         val result = BandConformanceRunner.run(
             "cross_session_credentials_rejected",

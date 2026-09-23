@@ -4,15 +4,16 @@ Last updated: **2026-09-23**
 
 ## Current round
 
+- [Kotlin scan-token identity](rounds/2026-09-23-kotlin-scan-token-identity.md)
 - [Application PR 17 exact-head remediation](rounds/2026-09-23-app-pr17-exact-head-remediation.md)
 
 ## Current boundary
 
-- Integration branch: `codex/sdk-pr22-review-remediation-20260923`
+- Integration branch: `codex/sdk-pr23-scan-token-identity-20260923`
 - GitHub branch protection: absent as of 2026-09-22; PR-only discipline is
   procedural, not enforced by a repository rule
-- Active branch: `codex/sdk-pr22-review-remediation-20260923`
-- Start commit: `a9d3f1a2a55b5436bf1b65b0299a27667241afa4`
+- Active branch: `codex/sdk-pr23-scan-token-identity-20260923`
+- Start commit: `1883ad33e840b1aa8b257f4f601f299f883678ca`
 - Implementation commit: pending
 - PR merge: pending
 - Supplier binaries: absent and prohibited
@@ -174,7 +175,15 @@ possession proof, firmware flashing, or OTA behavior.
     per-callback scenario evidence, and operations wording. The corrected-diff
     review found one remaining P2 reflection path plus two stale evidence
     statements. All are corrected; final exact-diff re-review reports no
-    remaining P0-P2 issue.
+  remaining P0-P2 issue.
+- Current Kotlin scan-token identity closeout:
+  - Field-identical same-module token forgery is rejected by exact object
+    identity while the issued token remains usable.
+  - Kotlin/JVM tests and `installDist`: passed.
+  - Swift package: 62/62 passed.
+  - Shared conformance: 41/41 matched.
+  - Repository gate: 59 files passed.
+  - Diff hygiene: passed.
 
 ## Next ordered actions
 

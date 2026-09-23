@@ -30,6 +30,7 @@ class BandSessionMachine(
     private var nextLiveReceiptSequence = 0L
     private var nextHistoryReceiptSequence = 0L
     private var activeOperation: BandOperationToken? = null
+    private var activeScanToken: BandScanToken? = null
     private var activeConnectionToken: BandConnectionToken? = null
     private var activeLiveToken: BandLiveToken? = null
     private var liveActive = false
@@ -102,10 +103,12 @@ class BandSessionMachine(
                 BandDiagnosticOutcome.BEGAN,
             ),
         )
-        return BandScanToken(
+        val token = BandScanToken(
             sessionNonce = sessionNonce,
             generation = generation,
         )
+        activeScanToken = token
+        return token
     }
 
     @Synchronized
@@ -151,6 +154,7 @@ class BandSessionMachine(
             sequence = nextConnectionSequence,
             candidateHandle = candidate.handle,
         )
+        activeScanToken = null
         activeConnectionToken = token
         state = BandSessionState.CANDIDATE_SELECTED
         diagnostics.record(
@@ -181,6 +185,7 @@ class BandSessionMachine(
             fail(BandFailureCategory.INVALID_STATE)
         }
         generation += 1
+        activeScanToken = null
         activeConnectionToken = null
         state = BandSessionState.IDLE
         diagnostics.record(
@@ -222,6 +227,7 @@ class BandSessionMachine(
             fail(BandFailureCategory.INVALID_INPUT)
         }
         generation += 1
+        activeScanToken = null
         activeConnectionToken = null
         state = BandSessionState.IDLE
         diagnostics.record(
@@ -1736,7 +1742,8 @@ class BandSessionMachine(
     ) {
         if (
             token.sessionNonce != sessionNonce ||
-            token.generation != generation
+            token.generation != generation ||
+            token !== activeScanToken
         ) {
             diagnostics.record(
                 BandDiagnosticEvent(
