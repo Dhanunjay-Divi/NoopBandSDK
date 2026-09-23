@@ -340,6 +340,30 @@ class BandSessionMachineTest {
     }
 
     @Test
+    fun scanCallbacksAreConsumedAfterSelection() {
+        val result = BandConformanceRunner.run(
+            "scan_callback_consumed_after_selection",
+        )
+        assertEquals(
+            listOf(
+                "scan_started",
+                "candidate_selected",
+                "late_select_rejected",
+                "late_cancel_rejected",
+                "late_failure_rejected",
+                "connection_preserved",
+                "current_session_ready",
+            ),
+            result.events,
+        )
+        assertEquals(
+            BandFailureCategory.STALE_CALLBACK.wireValue,
+            result.failure,
+        )
+        assertEquals(BandSessionState.READY.wireValue, result.finalState)
+    }
+
+    @Test
     fun scanTokenStringRenderingIsRedacted() {
         val token = BandSessionMachine().beginScan()
         assertEquals("BandScanToken", token.toString())

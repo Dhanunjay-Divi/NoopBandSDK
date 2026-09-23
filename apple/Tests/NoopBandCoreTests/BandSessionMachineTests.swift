@@ -223,6 +223,68 @@ struct BandSessionMachineTests {
         #expect(result.finalState == BandSessionState.ready.rawValue)
     }
 
+    @Test("Scan callbacks are stale after candidate selection")
+    func scanCallbacksAreConsumedAfterSelection() async throws {
+        let result = try await BandConformanceRunner.run(
+            "scan_callback_consumed_after_selection"
+        )
+        #expect(
+            result.events == [
+                "scan_started",
+                "candidate_selected",
+                "late_select_rejected",
+                "late_cancel_rejected",
+                "late_failure_rejected",
+                "connection_preserved",
+                "current_session_ready",
+            ]
+        )
+        #expect(result.failure == BandFailureCategory.staleCallback.rawValue)
+        #expect(result.finalState == BandSessionState.ready.rawValue)
+    }
+
+    @Test("Scan token is consumed before selection diagnostics suspend")
+    func scanTokenIsConsumedBeforeSelectionSuspends() async throws {
+        let recorder = BandDiagnosticsRecorder(capacity: 64)
+        let session = BandSessionMachine(diagnostics: recorder)
+        let scanToken = try await session.beginScan()
+        await recorder.requestNextRecordSuspensionForTesting()
+
+        let selectionTask = Task {
+            try await session.selectCandidate(
+                VirtualBandFixtures.candidate,
+                callbackGeneration: scanToken
+            )
+        }
+        await recorder.waitForRecordSuspensionForTesting()
+
+        let selecting = await session.snapshot()
+        #expect(selecting.state == .candidateSelected)
+        await #expect(throws: BandFailureCategory.staleCallback) {
+            _ = try await session.selectCandidate(
+                VirtualBandFixtures.candidate,
+                callbackGeneration: scanToken
+            )
+        }
+        await #expect(throws: BandFailureCategory.staleCallback) {
+            try await session.cancelScan(callbackGeneration: scanToken)
+        }
+        await #expect(throws: BandFailureCategory.staleCallback) {
+            try await session.failScan(
+                .timeout,
+                callbackGeneration: scanToken
+            )
+        }
+
+        await recorder.resumeSuspendedRecordForTesting()
+        let connectionToken = try await selectionTask.value
+        try await session.beginConnection(
+            token: connectionToken,
+            callbackGeneration: scanToken.generation
+        )
+        #expect(await session.snapshot().state == .connecting)
+    }
+
     @Test("Scan token string rendering is redacted")
     func scanTokenStringRenderingIsRedacted() async throws {
         let token = try await BandSessionMachine().beginScan()

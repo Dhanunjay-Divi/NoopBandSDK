@@ -72,6 +72,25 @@
       }
     },
     {
+      "id": "scan_callback_consumed_after_selection",
+      "automated": true,
+      "expected": {
+        "events": [
+          "scan_started",
+          "candidate_selected",
+          "late_select_rejected",
+          "late_cancel_rejected",
+          "late_failure_rejected",
+          "connection_preserved",
+          "current_session_ready"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "staleCallback"
+      }
+    },
+    {
       "id": "cross_session_credentials_rejected",
       "automated": true,
       "expected": {

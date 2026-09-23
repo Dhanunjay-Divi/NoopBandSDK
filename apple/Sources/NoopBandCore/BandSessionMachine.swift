@@ -24,6 +24,7 @@ public actor BandSessionMachine {
     private var nextLiveReceiptSequence: UInt64 = 0
     private var nextHistoryReceiptSequence: UInt64 = 0
     private var activeOperation: BandOperationToken?
+    private var activeScanToken: BandScanToken?
     private var activeConnectionToken: BandConnectionToken?
     private var activeLiveToken: BandLiveToken?
     private var liveActive = false
@@ -96,8 +97,13 @@ public actor BandSessionMachine {
         }
         generation &+= 1
         let scanGeneration = generation
+        let scanToken = BandScanToken(
+            sessionNonce: sessionNonce,
+            generation: scanGeneration
+        )
         clearOperationTracking()
         clearLiveTracking()
+        activeScanToken = scanToken
         activeConnectionToken = nil
         identity = nil
         capabilityReport = nil
@@ -106,7 +112,8 @@ public actor BandSessionMachine {
             BandDiagnosticEvent(kind: .discovery, outcome: .began)
         )
         guard generation == scanGeneration,
-              state == .scanning
+              state == .scanning,
+              activeScanToken == scanToken
         else {
             await diagnostics.record(
                 BandDiagnosticEvent(
@@ -117,10 +124,7 @@ public actor BandSessionMachine {
             )
             throw BandFailureCategory.staleCallback
         }
-        return BandScanToken(
-            sessionNonce: sessionNonce,
-            generation: scanGeneration
-        )
+        return scanToken
     }
 
     public func selectCandidate(
@@ -164,6 +168,7 @@ public actor BandSessionMachine {
             sequence: nextConnectionSequence,
             candidateHandle: candidate.handle
         )
+        activeScanToken = nil
         activeConnectionToken = token
         state = .candidateSelected
         await diagnostics.record(
@@ -199,6 +204,7 @@ public actor BandSessionMachine {
             throw BandFailureCategory.invalidState
         }
         generation &+= 1
+        activeScanToken = nil
         activeConnectionToken = nil
         state = .idle
         await diagnostics.record(
@@ -237,6 +243,7 @@ public actor BandSessionMachine {
                 : BandFailureCategory.invalidState
         }
         generation &+= 1
+        activeScanToken = nil
         activeConnectionToken = nil
         state = .idle
         await diagnostics.record(
@@ -1741,6 +1748,7 @@ public actor BandSessionMachine {
         generation &+= 1
         clearOperationTracking()
         clearLiveTracking()
+        activeScanToken = nil
         activeConnectionToken = nil
         identity = nil
         capabilityReport = nil
@@ -1773,7 +1781,8 @@ public actor BandSessionMachine {
         diagnosticKind: BandDiagnosticKind
     ) async throws {
         guard token.sessionNonce == sessionNonce,
-              token.generation == generation
+              token.generation == generation,
+              token == activeScanToken
         else {
             await diagnostics.record(
                 BandDiagnosticEvent(
