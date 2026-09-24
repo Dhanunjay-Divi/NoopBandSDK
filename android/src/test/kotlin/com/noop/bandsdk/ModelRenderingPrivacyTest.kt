@@ -73,6 +73,10 @@ class ModelRenderingPrivacyTest {
             unit = BandUnit.BEATS_PER_MINUTE,
             quality = BandSampleQuality.DEGRADED,
         )
+        val sampleFingerprint = BandSampleFingerprint(
+            identity = sampleIdentity,
+            payloadFingerprint = FINGERPRINT_SENTINEL,
+        )
         val batch = BandSampleBatch(
             sourceIdentity = SOURCE_SENTINEL,
             lane = BandProvenanceLane.HISTORY,
@@ -109,6 +113,7 @@ class ModelRenderingPrivacyTest {
             ),
             "BandSampleIdentity" to sampleIdentity,
             "BandSample" to sample,
+            "BandSampleFingerprint" to sampleFingerprint,
             "BandSampleBatch" to batch,
             "BandHistoryRange" to retainedRange,
             "BandHistoryChunk" to chunk,
@@ -117,6 +122,7 @@ class ModelRenderingPrivacyTest {
                 acknowledgedCursor = CHECKPOINT_CURSOR_SENTINEL,
                 lastHistoryComplete = false,
                 durableSampleIdentities = setOf(sampleIdentity),
+                durableSampleFingerprints = setOf(sampleFingerprint),
             ),
             "BandSessionSnapshot" to BandSessionSnapshot(
                 state = BandSessionState.HISTORY_COLLECTING,
@@ -156,6 +162,9 @@ class ModelRenderingPrivacyTest {
         const val SAMPLE_SEQUENCE_SENTINEL = 9_876_543_210L
         const val SAMPLE_TIME_SENTINEL = 1_977_777_777_777L
         const val SAMPLE_VALUE_SENTINEL = 173.625
+        const val FINGERPRINT_SENTINEL =
+            "abcdef0123456789abcdef0123456789" +
+                "abcdef0123456789abcdef0123456789"
         const val LOST_START_SENTINEL = 1_977_777_770_000L
         const val LOST_END_SENTINEL = 1_977_777_771_000L
         const val RETAINED_START_SENTINEL = 1_977_777_772_000L
@@ -178,6 +187,7 @@ class ModelRenderingPrivacyTest {
             SAMPLE_SEQUENCE_SENTINEL.toString(),
             SAMPLE_TIME_SENTINEL.toString(),
             SAMPLE_VALUE_SENTINEL.toString(),
+            FINGERPRINT_SENTINEL,
             LOST_START_SENTINEL.toString(),
             LOST_END_SENTINEL.toString(),
             RETAINED_START_SENTINEL.toString(),
@@ -216,6 +226,8 @@ class ModelRenderingPrivacyTest {
             "acknowledgedCursor",
             "lastHistoryComplete",
             "durableSampleIdentities",
+            "durableSampleFingerprints",
+            "payloadFingerprint",
         )
     }
 }

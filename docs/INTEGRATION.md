@@ -3,8 +3,8 @@
 ## Boundary
 
 The application consumes one digest-pinned source artifact generated from an
-approved `NoopBandSDK` commit. This avoids a live cross-private-repository
-dependency while preserving the SDK repository as the authority.
+approved `NoopBandSDK` commit. This avoids a live cross-repository dependency
+while preserving the SDK repository as the authority.
 
 The exporter accepts only the exact checked-out `HEAD` of a clean worktree. It
 refuses dirty or falsely labelled source and publishes the finished artifact
@@ -24,7 +24,7 @@ captures, health data, endpoints, or firmware.
 
 ## Application rules
 
-1. Commit the generated artifact and manifest to the private NOOP application
+1. Commit the generated artifact and manifest to the public NOOP application
    repository under a dedicated generated-source boundary.
 2. Treat generated files as read-only. Changes begin in `NoopBandSDK`, rerun
    its tests, regenerate the artifact, and verify every manifest digest.
@@ -37,8 +37,11 @@ captures, health data, endpoints, or firmware.
    Live delivery never advances history. A history acknowledgment requires the
    exact durable receipt returned after app-store commit.
 6. Persist the source-scoped history checkpoint after acknowledgment and seed a
-   replacement process with that cursor plus its bounded recent identity set.
-   Never restore one band's checkpoint into another source identity.
+   replacement process with that cursor, its bounded recent identity set, and
+   the matching SHA-256 payload fingerprints. The fingerprints are sensitive
+   integrity metadata, not encryption; keep the checkpoint in encrypted local
+   storage and exclude it from logs, diagnostics, analytics, and exports. Never
+   restore one band's checkpoint into another source identity.
 7. Persist exact history `complete` and `overflowed` flags before setting
    `historyStateCommitted` in a receipt. An incomplete range cannot complete
    the SDK history operation.
@@ -120,7 +123,7 @@ physical-device evidence.
 
 ## Release sequence
 
-1. Merge and privately tag a reviewed SDK revision.
+1. Merge and tag a reviewed SDK revision.
 2. Generate the source artifact with that full revision.
 3. Verify the artifact manifest independently.
 4. Vendor it into an isolated NOOP app branch.

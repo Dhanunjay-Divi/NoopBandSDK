@@ -69,6 +69,8 @@ class BandSessionMachine(
     private val durableSampleIdentities = mutableSetOf<BandSampleIdentity>()
     private val durableSamplesByIdentity =
         mutableMapOf<BandSampleIdentity, BandSample>()
+    private val durableSampleFingerprintsByIdentity =
+        mutableMapOf<BandSampleIdentity, BandSampleFingerprint>()
     private val durableSampleIdentityOrder = ArrayDeque<BandSampleIdentity>()
     private var durableSourceIdentity: String? = null
     private var restoredHistoryCheckpointConsumed = false
@@ -97,6 +99,8 @@ class BandSessionMachine(
             acknowledgedCursor = acknowledgedHistoryCursor,
             lastHistoryComplete = lastDurableHistoryComplete,
             durableSampleIdentities = durableSampleIdentities.toSet(),
+            durableSampleFingerprints =
+                durableSampleFingerprintsByIdentity.values.toSet(),
         )
     }
 
@@ -1670,7 +1674,9 @@ class BandSessionMachine(
             )
             fail(BandFailureCategory.BUSY)
         }
-        if (
+        if (terminalFirmwareFailure) {
+            invalidateAuthenticatedSession(BandSessionState.FIRMWARE_FAILURE)
+        } else if (
             category == BandFailureCategory.SECURITY_FAILURE ||
             category == BandFailureCategory.AUTHENTICATION
         ) {
@@ -1704,8 +1710,6 @@ class BandSessionMachine(
                 },
             )
             return null
-        } else if (terminalFirmwareFailure) {
-            invalidateAuthenticatedSession(BandSessionState.FIRMWARE_FAILURE)
         } else if (
             token.operationClass == BandOperationClass.FIRMWARE &&
             category == BandFailureCategory.DISCONNECTED
@@ -2450,24 +2454,30 @@ class BandSessionMachine(
     private fun clearDurableSampleIdentities() {
         durableSampleIdentities.clear()
         durableSamplesByIdentity.clear()
+        durableSampleFingerprintsByIdentity.clear()
         durableSampleIdentityOrder.clear()
     }
 
-    private fun restoreDurableSampleIdentities(
-        identities: Set<BandSampleIdentity>,
+    private fun restoreDurableSampleFingerprints(
+        fingerprints: Set<BandSampleFingerprint>,
     ) {
         clearDurableSampleIdentities()
-        rememberDurableSampleIdentities(
-            identities.sortedWith(
-                compareBy<BandSampleIdentity> {
-                    it.deviceTimeMilliseconds
-                }.thenBy {
-                    it.sequence
-                }.thenBy {
-                    it.stream.wireValue
-                },
-            ),
+        val ordered = fingerprints.sortedWith(
+            compareBy<BandSampleFingerprint> {
+                it.identity.deviceTimeMilliseconds
+            }.thenBy {
+                it.identity.sequence
+            }.thenBy {
+                it.identity.stream.wireValue
+            },
         )
+        rememberDurableSampleIdentities(
+            ordered.map(BandSampleFingerprint::identity),
+        )
+        ordered.forEach { fingerprint ->
+            durableSampleFingerprintsByIdentity[fingerprint.identity] =
+                fingerprint
+        }
     }
 
     private fun prepareDurableState(sourceIdentity: String) {
@@ -2487,8 +2497,8 @@ class BandSessionMachine(
                 )
                 fail(BandFailureCategory.INVALID_INPUT)
             }
-            restoreDurableSampleIdentities(
-                restoredHistoryCheckpoint.durableSampleIdentities,
+            restoreDurableSampleFingerprints(
+                restoredHistoryCheckpoint.durableSampleFingerprints,
             )
             acknowledgedHistoryCursor =
                 restoredHistoryCheckpoint.acknowledgedCursor
@@ -2516,6 +2526,7 @@ class BandSessionMachine(
                     val oldest = durableSampleIdentityOrder.removeFirst()
                     durableSampleIdentities.remove(oldest)
                     durableSamplesByIdentity.remove(oldest)
+                    durableSampleFingerprintsByIdentity.remove(oldest)
                 }
                 durableSampleIdentities.add(identity)
                 durableSampleIdentityOrder.addLast(identity)
@@ -2528,6 +2539,8 @@ class BandSessionMachine(
         samples.forEach { sample ->
             if (sample.identity in durableSampleIdentities) {
                 durableSamplesByIdentity[sample.identity] = sample
+                durableSampleFingerprintsByIdentity[sample.identity] =
+                    BandSampleFingerprint(sample)
             }
         }
     }
@@ -2544,7 +2557,7 @@ class BandSessionMachine(
         samples.forEach { sample ->
             val incoming = incomingByIdentity[sample.identity]
             if (incoming != null) {
-                if (incoming != sample) {
+                if (!incoming.hasEquivalentPayload(sample)) {
                     diagnostics.record(
                         BandDiagnosticEvent(
                             diagnosticKind,
@@ -2559,7 +2572,7 @@ class BandSessionMachine(
                 incomingByIdentity[sample.identity] = sample
                 val durable = durableSamplesByIdentity[sample.identity]
                 if (durable != null) {
-                    if (durable != sample) {
+                    if (!durable.hasEquivalentPayload(sample)) {
                         diagnostics.record(
                             BandDiagnosticEvent(
                                 diagnosticKind,
@@ -2571,10 +2584,25 @@ class BandSessionMachine(
                         fail(BandFailureCategory.INVALID_INPUT)
                     }
                     duplicates += 1
-                } else if (sample.identity in durableSampleIdentities) {
-                    duplicates += 1
                 } else {
-                    unique += sample
+                    val fingerprint =
+                        durableSampleFingerprintsByIdentity[sample.identity]
+                    if (fingerprint != null) {
+                        if (!fingerprint.matches(sample)) {
+                            diagnostics.record(
+                                BandDiagnosticEvent(
+                                    diagnosticKind,
+                                    BandDiagnosticOutcome.REJECTED,
+                                    failureCategory =
+                                    BandFailureCategory.INVALID_INPUT,
+                                ),
+                            )
+                            fail(BandFailureCategory.INVALID_INPUT)
+                        }
+                        duplicates += 1
+                    } else {
+                        unique += sample
+                    }
                 }
             }
         }

@@ -83,6 +83,10 @@ struct ModelRenderingPrivacyTests {
             unit: .beatsPerMinute,
             quality: .degraded
         )
+        let sampleFingerprint = BandSampleFingerprint(
+            identity: sampleIdentity,
+            payloadFingerprint: Self.fingerprintSentinel
+        )
         let batch = BandSampleBatch(
             sourceIdentity: Self.sourceSentinel,
             lane: .history,
@@ -122,6 +126,10 @@ struct ModelRenderingPrivacyTests {
             ),
             ModelFixture(name: "BandSampleIdentity", value: sampleIdentity),
             ModelFixture(name: "BandSample", value: sample),
+            ModelFixture(
+                name: "BandSampleFingerprint",
+                value: sampleFingerprint
+            ),
             ModelFixture(name: "BandSampleBatch", value: batch),
             ModelFixture(name: "BandHistoryRange", value: retainedRange),
             ModelFixture(name: "BandHistoryChunk", value: chunk),
@@ -131,7 +139,8 @@ struct ModelRenderingPrivacyTests {
                     sourceIdentity: Self.sourceSentinel,
                     acknowledgedCursor: Self.checkpointCursorSentinel,
                     lastHistoryComplete: false,
-                    durableSampleIdentities: [sampleIdentity]
+                    durableSampleIdentities: [sampleIdentity],
+                    durableSampleFingerprints: [sampleFingerprint]
                 )
             ),
             ModelFixture(
@@ -205,6 +214,9 @@ struct ModelRenderingPrivacyTests {
     private static let sampleSequenceSentinel: UInt64 = 9_876_543_210
     private static let sampleTimeSentinel: Int64 = 1_977_777_777_777
     private static let sampleValueSentinel = 173.625
+    private static let fingerprintSentinel =
+        "abcdef0123456789abcdef0123456789"
+        + "abcdef0123456789abcdef0123456789"
     private static let lostStartSentinel: Int64 = 1_977_777_770_000
     private static let lostEndSentinel: Int64 = 1_977_777_771_000
     private static let retainedStartSentinel: Int64 = 1_977_777_772_000
@@ -227,6 +239,7 @@ struct ModelRenderingPrivacyTests {
         String(sampleSequenceSentinel),
         String(sampleTimeSentinel),
         String(sampleValueSentinel),
+        fingerprintSentinel,
         String(lostStartSentinel),
         String(lostEndSentinel),
         String(retainedStartSentinel),
@@ -265,5 +278,7 @@ struct ModelRenderingPrivacyTests {
         "acknowledgedCursor",
         "lastHistoryComplete",
         "durableSampleIdentities",
+        "durableSampleFingerprints",
+        "payloadFingerprint",
     ]
 }

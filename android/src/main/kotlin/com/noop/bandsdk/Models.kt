@@ -1,5 +1,6 @@
 package com.noop.bandsdk
 
+import java.security.MessageDigest
 import java.util.Collections
 import java.util.UUID
 
@@ -168,14 +169,14 @@ enum class BandStreamKind(val wireValue: String) {
     ACCELERATION("acceleration"),
 }
 
-enum class BandUnit {
-    BEATS_PER_MINUTE,
-    MILLISECONDS,
-    COUNT,
-    PERCENT,
-    BREATHS_PER_MINUTE,
-    CELSIUS,
-    GRAVITY,
+enum class BandUnit(val wireValue: String) {
+    BEATS_PER_MINUTE("beatsPerMinute"),
+    MILLISECONDS("milliseconds"),
+    COUNT("count"),
+    PERCENT("percent"),
+    BREATHS_PER_MINUTE("breathsPerMinute"),
+    CELSIUS("celsius"),
+    GRAVITY("gravity"),
 }
 
 internal fun requiredUnit(stream: BandStreamKind): BandUnit = when (stream) {
@@ -188,10 +189,10 @@ internal fun requiredUnit(stream: BandStreamKind): BandUnit = when (stream) {
     BandStreamKind.ACCELERATION -> BandUnit.GRAVITY
 }
 
-enum class BandSampleQuality {
-    ACCEPTED,
-    DEGRADED,
-    REJECTED,
+enum class BandSampleQuality(val wireValue: String) {
+    ACCEPTED("accepted"),
+    DEGRADED("degraded"),
+    REJECTED("rejected"),
 }
 
 enum class BandCadenceKind(val wireValue: String) {
@@ -372,6 +373,10 @@ data class BandCapabilityReport(
         streamSemantics.groupingBy { it }.eachCount()
 
     fun validate() {
+        immutableSnapshot().validateSnapshot()
+    }
+
+    private fun validateSnapshot() {
         val expectedSemantics =
             liveStreams.map { BandStreamSemanticKey(BandProvenanceLane.LIVE, it) } +
                 historyStreams.map {
@@ -507,6 +512,24 @@ data class BandSample(
 ) {
     override fun toString(): String = "BandSample"
 
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is BandSample) return false
+        return identity == other.identity &&
+            value == other.value &&
+            unit == other.unit &&
+            quality == other.quality
+    }
+
+    override fun hashCode(): Int {
+        var result = identity.hashCode()
+        val normalizedValue = if (value == 0.0) 0.0 else value
+        result = 31 * result + normalizedValue.hashCode()
+        result = 31 * result + unit.hashCode()
+        result = 31 * result + quality.hashCode()
+        return result
+    }
+
     fun validate() {
         if (
             identity.sequence < 0 ||
@@ -540,6 +563,65 @@ data class BandSample(
             fail(BandFailureCategory.INVALID_INPUT)
         }
     }
+
+    internal fun hasEquivalentPayload(other: BandSample): Boolean =
+        identity == other.identity &&
+            value == other.value &&
+            unit == other.unit &&
+            quality == other.quality
+}
+
+data class BandSampleFingerprint(
+    val identity: BandSampleIdentity,
+    val payloadFingerprint: String,
+) {
+    constructor(sample: BandSample) : this(
+        identity = sample.identity,
+        payloadFingerprint = samplePayloadFingerprint(sample),
+    )
+
+    override fun toString(): String = "BandSampleFingerprint"
+
+    fun validate() {
+        if (
+            identity.sequence < 0 ||
+            identity.deviceTimeMilliseconds <
+            BandContractLimits.MINIMUM_DEVICE_TIME_MILLISECONDS ||
+            payloadFingerprint.length != 64 ||
+            payloadFingerprint.any {
+                it !in '0'..'9' && it !in 'a'..'f'
+            }
+        ) {
+            fail(BandFailureCategory.INVALID_INPUT)
+        }
+    }
+
+    internal fun matches(sample: BandSample): Boolean =
+        identity == sample.identity &&
+            payloadFingerprint == samplePayloadFingerprint(sample)
+}
+
+private fun samplePayloadFingerprint(sample: BandSample): String {
+    val normalizedBits = if (sample.value == 0.0) {
+        0L
+    } else {
+        java.lang.Double.doubleToRawLongBits(sample.value)
+    }
+    val bits = java.lang.Long.toUnsignedString(normalizedBits, 16)
+        .padStart(16, '0')
+    val canonical =
+        "v2|$bits|${sample.unit.wireValue}|${sample.quality.wireValue}"
+    val digest = MessageDigest.getInstance("SHA-256").digest(
+        canonical.toByteArray(Charsets.UTF_8),
+    )
+    val hex = "0123456789abcdef"
+    return buildString(digest.size * 2) {
+        digest.forEach { byte ->
+            val value = byte.toInt() and 0xff
+            append(hex[value ushr 4])
+            append(hex[value and 0x0f])
+        }
+    }
 }
 
 data class BandSampleBatch(
@@ -552,6 +634,10 @@ data class BandSampleBatch(
     override fun toString(): String = "BandSampleBatch"
 
     fun validate(expectedLane: BandProvenanceLane) {
+        val immutableSamples = samples.boundedSnapshot(
+            BandContractLimits.SAMPLES_PER_BATCH,
+            BandSample::class.java,
+        )
         if (
             lane != expectedLane ||
             !sourceIdentity.hasValidUtf8Length(
@@ -563,12 +649,11 @@ data class BandSampleBatch(
             !calibrationRevision.hasValidUtf8Length(
                 BandContractLimits.REVISION_LENGTH,
             ) ||
-            samples.isEmpty() ||
-            samples.size > BandContractLimits.SAMPLES_PER_BATCH
+            immutableSamples.isEmpty()
         ) {
             fail(BandFailureCategory.INVALID_INPUT)
         }
-        samples.forEach(BandSample::validate)
+        immutableSamples.forEach(BandSample::validate)
     }
 
     internal fun immutableSnapshot(
@@ -614,6 +699,11 @@ data class BandHistoryChunk(
     override fun toString(): String = "BandHistoryChunk"
 
     fun validate() {
+        val immutableChunk = immutableSnapshot()
+        immutableChunk.validateSnapshot()
+    }
+
+    private fun validateSnapshot() {
         if (
             !chunkIdentity.hasValidUtf8Length(
                 BandContractLimits.OPAQUE_HANDLE_LENGTH,
@@ -771,15 +861,26 @@ internal fun <T : Any> Set<T>.boundedSnapshot(
     return snapshot
 }
 
-data class BandHistoryCheckpoint(
+data class BandHistoryCheckpoint @JvmOverloads constructor(
     val sourceIdentity: String,
     val acknowledgedCursor: String?,
     val lastHistoryComplete: Boolean?,
     val durableSampleIdentities: Set<BandSampleIdentity>,
+    val durableSampleFingerprints: Set<BandSampleFingerprint> = emptySet(),
 ) {
     override fun toString(): String = "BandHistoryCheckpoint"
 
     fun validate() {
+        val immutableIdentities = durableSampleIdentities.boundedSnapshot(
+            BandContractLimits.HISTORY_CHECKPOINT_IDENTITIES,
+            BandSampleIdentity::class.java,
+        )
+        val immutableFingerprints = durableSampleFingerprints.boundedSnapshot(
+            BandContractLimits.HISTORY_CHECKPOINT_IDENTITIES,
+            BandSampleFingerprint::class.java,
+        )
+        val fingerprintIdentities =
+            immutableFingerprints.map(BandSampleFingerprint::identity)
         if (
             !sourceIdentity.hasValidUtf8Length(
                 BandContractLimits.SOURCE_IDENTITY_LENGTH,
@@ -787,23 +888,37 @@ data class BandHistoryCheckpoint(
             acknowledgedCursor?.let {
                 !it.hasValidUtf8Length(BandContractLimits.CURSOR_LENGTH)
             } ?: false ||
-            durableSampleIdentities.size >
-            BandContractLimits.HISTORY_CHECKPOINT_IDENTITIES ||
-            durableSampleIdentities.any {
+            immutableIdentities.any {
                 it.sequence < 0 ||
                     it.deviceTimeMilliseconds <
                     BandContractLimits.MINIMUM_DEVICE_TIME_MILLISECONDS
-            }
+            } ||
+            fingerprintIdentities.toSet().size !=
+            immutableFingerprints.size ||
+            (
+                immutableFingerprints.isNotEmpty() &&
+                    fingerprintIdentities.toSet() != immutableIdentities
+                )
         ) {
             fail(BandFailureCategory.INVALID_INPUT)
         }
+        immutableFingerprints.forEach(BandSampleFingerprint::validate)
     }
 
-    internal fun immutableSnapshot(): BandHistoryCheckpoint = copy(
-        durableSampleIdentities = durableSampleIdentities.boundedSnapshot(
+    internal fun immutableSnapshot(): BandHistoryCheckpoint {
+        val immutableIdentities = durableSampleIdentities.boundedSnapshot(
             BandContractLimits.HISTORY_CHECKPOINT_IDENTITIES,
-        ),
-    )
+            BandSampleIdentity::class.java,
+        )
+        val immutableFingerprints = durableSampleFingerprints.boundedSnapshot(
+            BandContractLimits.HISTORY_CHECKPOINT_IDENTITIES,
+            BandSampleFingerprint::class.java,
+        )
+        return copy(
+            durableSampleIdentities = immutableIdentities,
+            durableSampleFingerprints = immutableFingerprints,
+        )
+    }
 }
 
 class BandOperationToken internal constructor(

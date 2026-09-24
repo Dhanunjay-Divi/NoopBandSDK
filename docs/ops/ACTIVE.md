@@ -1,9 +1,10 @@
 # Active NOOP Band SDK handoff
 
-Last updated: **2026-09-23**
+Last updated: **2026-09-24**
 
 ## Current round
 
+- [Application PR 17 post-review closeout](rounds/2026-09-23-app-pr17-post-review-closeout.md)
 - [Application PR 17 final review closeout](rounds/2026-09-23-app-pr17-final-review-closeout.md)
 - [Capability report equivalence](rounds/2026-09-23-capability-report-equivalence.md)
 - [PR 17 final contract closeout](rounds/2026-09-23-pr17-final-contract-closeout.md)
@@ -17,6 +18,32 @@ Last updated: **2026-09-23**
 
 ## Current boundary
 
+- Application PR `#17` exact head `aa3fa63c401fc60e486055ada3676df0f5f02d5b`
+  passes all ten protected contexts and every hosted Apple, Android, package,
+  server, policy, localization, operations, and trust job. Protected merge is
+  correctly blocked by seven unresolved review threads. Six are confirmed SDK
+  contract defects and one is superseded application documentation. SDK PR
+  `#32` remediation is active from protected source baseline
+  `9fd84ff6af3d48c41fb5af3128efec9dcc6948a4` in isolated state-machine,
+  model-safety, and integration branches. The combined candidate passes Swift
+  `104/104`, Kotlin/JVM `109/109` plus `installDist`, shared conformance
+  `50/50`, the `73`-file repository gate, and diff hygiene. The first
+  independent review then found terminal firmware/auth ordering,
+  restart-safe conflict detection, signed-zero parity, and direct Java
+  validation gaps. A second review then found incomplete capability-report
+  snapshot validation, a collision-prone 64-bit restart proof, public
+  signed-zero equality drift, and loss of the previous four-argument Java
+  checkpoint constructor. The corrected exact candidate uses canonical
+  SHA-256 replay evidence as sensitive encrypted-checkpoint metadata, snapshots
+  every public capability collection, aligns sample and batch equality, and
+  retains the old JVM constructor. Exact-current evidence passes complete Swift
+  `106/106`; Kotlin/JVM `114/114` with zero failures, errors, or skips plus
+  `installDist`; shared conformance `50/50`; the `73`-file repository gate; and
+  diff hygiene. Final independent exact-diff review reports no remaining
+  P0-P2 finding. SDK pull-request publication is the next action.
+- Both `Dhanunjay-Divi/Noop` and `Dhanunjay-Divi/NoopBandSDK` remain public by
+  owner decision. SDK-D-010 supersedes the original private-repository
+  assumption without permitting supplier artifacts or private inputs in Git.
 - Application PR `#17` final review closeout merged through SDK PR `#30` at
   `b027cbd9702936d4903f3293ca605650cdf5c413`. A post-integration follow-up is
   active on branch `codex/sdk-pr31-review-closeout-20260923`. Apple capability

@@ -2737,6 +2737,40 @@ struct BandSessionMachineTests {
         }
     }
 
+    @Test("Terminal firmware disposition dominates auth failure categories")
+    func terminalFirmwareDispositionDominatesAuthFailures() async throws {
+        for category in [
+            BandFailureCategory.authentication,
+            .securityFailure,
+        ] {
+            let recorder = BandDiagnosticsRecorder()
+            let (session, _) = try await readySession(
+                capabilities: firmwareCapabilities,
+                diagnostics: recorder
+            )
+            let operation = try await session.beginOperation(.firmware)
+            let eventCount = await recorder.snapshot().count
+
+            _ = try await session.failOperation(
+                operation,
+                category: category,
+                firmwareDisposition: .terminal
+            )
+
+            #expect(await session.snapshot().state == .firmwareFailure)
+            #expect(
+                Array(await recorder.snapshot().dropFirst(eventCount)) == [
+                    BandDiagnosticEvent(
+                        kind: .firmware,
+                        outcome: .terminal,
+                        failureCategory: category,
+                        operationClass: .firmware
+                    ),
+                ]
+            )
+        }
+    }
+
     @Test("Reconnect requires session-bound authority and issues a new connection token")
     func reconnectRequiresSessionBoundTokens() async throws {
         let (session, generation, originalToken) =
@@ -3813,6 +3847,131 @@ struct BandSessionMachineTests {
         try await historyFirst.completeOperation(historyFirstToken)
     }
 
+    @Test("Restored fingerprints reject conflicts and normalize signed zero")
+    func restoredFingerprintsRejectConflictsAndNormalizeSignedZero()
+        async throws
+    {
+        let identity = BandSampleIdentity(
+            stream: .acceleration,
+            sequence: 77,
+            deviceTimeMilliseconds: 77
+        )
+        let positiveZero = BandSample(
+            identity: identity,
+            value: 0,
+            unit: .gravity,
+            quality: .accepted
+        )
+        let negativeZero = BandSample(
+            identity: identity,
+            value: -0.0,
+            unit: .gravity,
+            quality: .accepted
+        )
+        let fingerprint = BandSampleFingerprint(sample: positiveZero)
+        #expect(
+            fingerprint.payloadFingerprint
+                == "a10e64de6afbbee0a9f4c4da6ab1e54"
+                + "a3c5a77adc94ba6c76092b1cf419a0046"
+        )
+        #expect(fingerprint == BandSampleFingerprint(sample: negativeZero))
+        #expect(positiveZero == negativeZero)
+        #expect(positiveZero.hasEquivalentPayload(to: negativeZero))
+        #expect(
+            BandSampleBatch(
+                sourceIdentity: VirtualBandFixtures.identity.sourceIdentity,
+                lane: .live,
+                parserRevision: "parser-v1",
+                calibrationRevision: "calibration-v1",
+                samples: [positiveZero]
+            )
+                == BandSampleBatch(
+                    sourceIdentity:
+                        VirtualBandFixtures.identity.sourceIdentity,
+                    lane: .live,
+                    parserRevision: "parser-v1",
+                    calibrationRevision: "calibration-v1",
+                    samples: [negativeZero]
+                )
+        )
+
+        let checkpoint = BandHistoryCheckpoint(
+            sourceIdentity: VirtualBandFixtures.identity.sourceIdentity,
+            acknowledgedCursor: nil,
+            lastHistoryComplete: nil,
+            durableSampleIdentities: [identity],
+            durableSampleFingerprints: [fingerprint]
+        )
+        let (session, generation, _) = try await readySessionWithToken(
+            capabilities: VirtualBandFixtures.capabilities,
+            historyCheckpoint: checkpoint
+        )
+        let liveToken = try await session.beginLive()
+        let exactReplay = BandSampleBatch(
+            sourceIdentity: VirtualBandFixtures.identity.sourceIdentity,
+            lane: .live,
+            parserRevision: "parser-v1",
+            calibrationRevision: "calibration-v1",
+            samples: [negativeZero]
+        )
+        let duplicate = try await session.stageLiveBatch(
+            exactReplay,
+            token: liveToken,
+            callbackGeneration: generation
+        )
+        #expect(duplicate.acceptedSamples.isEmpty)
+        #expect(duplicate.duplicateSamples == 1)
+        try await session.acknowledgeLive(
+            receipt: DurableLiveReceipt(
+                acceptance: duplicate,
+                committedSamples: 0,
+                committed: true
+            ),
+            callbackGeneration: generation
+        )
+
+        let conflicting = BandSampleBatch(
+            sourceIdentity: exactReplay.sourceIdentity,
+            lane: exactReplay.lane,
+            parserRevision: exactReplay.parserRevision,
+            calibrationRevision: exactReplay.calibrationRevision,
+            samples: [
+                BandSample(
+                    identity: identity,
+                    value: 1,
+                    unit: .gravity,
+                    quality: .accepted
+                ),
+            ]
+        )
+        await #expect(throws: BandFailureCategory.invalidInput) {
+            _ = try await session.stageLiveBatch(
+                conflicting,
+                token: liveToken,
+                callbackGeneration: generation
+            )
+        }
+
+        let legacyCheckpoint = BandHistoryCheckpoint(
+            sourceIdentity: VirtualBandFixtures.identity.sourceIdentity,
+            acknowledgedCursor: nil,
+            lastHistoryComplete: nil,
+            durableSampleIdentities: [identity]
+        )
+        let (legacy, legacyGeneration, _) = try await readySessionWithToken(
+            capabilities: VirtualBandFixtures.capabilities,
+            historyCheckpoint: legacyCheckpoint
+        )
+        let legacyToken = try await legacy.beginLive()
+        let legacyReplay = try await legacy.stageLiveBatch(
+            exactReplay,
+            token: legacyToken,
+            callbackGeneration: legacyGeneration
+        )
+        #expect(legacyReplay.acceptedSamples.count == 1)
+        #expect(legacyReplay.duplicateSamples == 0)
+    }
+
     @Test("Invalid history tokens record bounded rejection diagnostics")
     func invalidHistoryTokensRecordDiagnostics() async throws {
         let recorder = BandDiagnosticsRecorder()
@@ -4393,13 +4552,17 @@ struct BandSessionMachineTests {
         capabilities: BandCapabilityReport =
             VirtualBandFixtures.capabilities,
         diagnostics: BandDiagnosticsRecorder = BandDiagnosticsRecorder(),
-        identity: BandIdentity = VirtualBandFixtures.identity
+        identity: BandIdentity = VirtualBandFixtures.identity,
+        historyCheckpoint: BandHistoryCheckpoint? = nil
     ) async throws -> (
         BandSessionMachine,
         UInt64,
         BandConnectionToken
     ) {
-        let session = BandSessionMachine(diagnostics: diagnostics)
+        let session = BandSessionMachine(
+            diagnostics: diagnostics,
+            historyCheckpoint: historyCheckpoint
+        )
         let scanToken = try await session.beginScan()
         let generation = scanToken.generation
         let connectionToken = try await session.selectCandidate(

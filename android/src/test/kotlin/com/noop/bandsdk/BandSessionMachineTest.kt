@@ -3147,6 +3147,50 @@ class BandSessionMachineTest {
     }
 
     @Test
+    fun terminalFirmwareDispositionDominatesAuthFailures() {
+        val firmwareCapabilities = VirtualBandFixtures.capabilities.copy(
+            capabilities =
+                VirtualBandFixtures.capabilities.capabilities +
+                    BandCapability.FIRMWARE_UPDATE,
+        )
+        listOf(
+            BandFailureCategory.AUTHENTICATION,
+            BandFailureCategory.SECURITY_FAILURE,
+        ).forEach { category ->
+            val recorder = BandDiagnosticsRecorder()
+            val (session, _) = readySessionWithCapabilities(
+                firmwareCapabilities,
+                recorder,
+            )
+            val operation =
+                session.beginOperation(BandOperationClass.FIRMWARE)
+            val eventCount = recorder.snapshot().size
+
+            session.failOperation(
+                operation,
+                category,
+                BandFirmwareFailureDisposition.TERMINAL,
+            )
+
+            assertEquals(
+                BandSessionState.FIRMWARE_FAILURE,
+                session.snapshot().state,
+            )
+            assertEquals(
+                listOf(
+                    BandDiagnosticEvent(
+                        BandDiagnosticKind.FIRMWARE,
+                        BandDiagnosticOutcome.TERMINAL,
+                        failureCategory = category,
+                        operationClass = BandOperationClass.FIRMWARE,
+                    ),
+                ),
+                recorder.snapshot().drop(eventCount),
+            )
+        }
+    }
+
+    @Test
     fun reconnectRequiresSessionBoundTokens() {
         val (session, generation, originalToken) = readySessionWithToken()
         val (foreignSession, foreignGeneration, foreignConnectionToken) =
@@ -4125,6 +4169,89 @@ class BandSessionMachineTest {
     }
 
     @Test
+    fun restoredFingerprintsRejectConflictsAndNormalizeSignedZero() {
+        val identity = BandSampleIdentity(
+            stream = BandStreamKind.ACCELERATION,
+            sequence = 77,
+            deviceTimeMilliseconds = 77,
+        )
+        val positiveZero = BandSample(
+            identity = identity,
+            value = 0.0,
+            unit = BandUnit.GRAVITY,
+            quality = BandSampleQuality.ACCEPTED,
+        )
+        val negativeZero = positiveZero.copy(value = -0.0)
+        val fingerprint = BandSampleFingerprint(positiveZero)
+        assertEquals(
+            "a10e64de6afbbee0a9f4c4da6ab1e54" +
+                "a3c5a77adc94ba6c76092b1cf419a0046",
+            fingerprint.payloadFingerprint,
+        )
+        assertEquals(fingerprint, BandSampleFingerprint(negativeZero))
+        assertEquals(positiveZero, negativeZero)
+        assertEquals(positiveZero.hashCode(), negativeZero.hashCode())
+        assertTrue(positiveZero.hasEquivalentPayload(negativeZero))
+        assertEquals(
+            VirtualBandFixtures.liveBatch.copy(samples = listOf(positiveZero)),
+            VirtualBandFixtures.liveBatch.copy(samples = listOf(negativeZero)),
+        )
+
+        val checkpoint = BandHistoryCheckpoint(
+            sourceIdentity = VirtualBandFixtures.identity.sourceIdentity,
+            acknowledgedCursor = null,
+            lastHistoryComplete = null,
+            durableSampleIdentities = setOf(identity),
+            durableSampleFingerprints = setOf(fingerprint),
+        )
+        val (session, generation, _) = readySessionWithToken(
+            restoredHistoryCheckpoint = checkpoint,
+        )
+        val liveToken = session.beginLive()
+        val exactReplay = VirtualBandFixtures.liveBatch.copy(
+            samples = listOf(negativeZero),
+        )
+        val duplicate =
+            session.stageLiveBatch(exactReplay, liveToken, generation)
+        assertTrue(duplicate.acceptedSamples.isEmpty())
+        assertEquals(1, duplicate.duplicateSamples)
+        session.acknowledgeLive(
+            DurableLiveReceipt(
+                acceptance = duplicate,
+                committedSamples = 0,
+                committed = true,
+            ),
+            generation,
+        )
+
+        val conflict = assertFailsWith<BandException> {
+            session.stageLiveBatch(
+                exactReplay.copy(
+                    samples = listOf(positiveZero.copy(value = 1.0)),
+                ),
+                liveToken,
+                generation,
+            )
+        }
+        assertEquals(BandFailureCategory.INVALID_INPUT, conflict.category)
+
+        val legacyCheckpoint = BandHistoryCheckpoint(
+            sourceIdentity = VirtualBandFixtures.identity.sourceIdentity,
+            acknowledgedCursor = null,
+            lastHistoryComplete = null,
+            durableSampleIdentities = setOf(identity),
+        )
+        val (legacy, legacyGeneration, _) = readySessionWithToken(
+            restoredHistoryCheckpoint = legacyCheckpoint,
+        )
+        val legacyToken = legacy.beginLive()
+        val legacyReplay =
+            legacy.stageLiveBatch(exactReplay, legacyToken, legacyGeneration)
+        assertEquals(1, legacyReplay.acceptedSamples.size)
+        assertEquals(0, legacyReplay.duplicateSamples)
+    }
+
+    @Test
     fun invalidHistoryTokensRecordBoundedRejectionDiagnostics() {
         val recorder = BandDiagnosticsRecorder()
         val (session, generation) = readySession(recorder)
@@ -4675,8 +4802,12 @@ class BandSessionMachineTest {
         capabilities: BandCapabilityReport =
             VirtualBandFixtures.capabilities,
         identity: BandIdentity = VirtualBandFixtures.identity,
+        restoredHistoryCheckpoint: BandHistoryCheckpoint? = null,
     ): Triple<BandSessionMachine, Long, BandConnectionToken> {
-        val session = BandSessionMachine(diagnostics)
+        val session = BandSessionMachine(
+            diagnostics,
+            restoredHistoryCheckpoint,
+        )
         val scanToken = session.beginScan()
         val generation = scanToken.generation
         val connectionToken =

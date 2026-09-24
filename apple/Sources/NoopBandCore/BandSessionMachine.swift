@@ -42,6 +42,8 @@ public actor BandSessionMachine {
     private var historyOperationLastReceiptComplete: Bool?
     private var durableSampleIdentities: Set<BandSampleIdentity> = []
     private var durableSamplesByIdentity: [BandSampleIdentity: BandSample] = [:]
+    private var durableSampleFingerprintsByIdentity:
+        [BandSampleIdentity: BandSampleFingerprint] = [:]
     private var durableSampleIdentityOrder: [BandSampleIdentity] = []
     private var durableSampleIdentityNextEviction = 0
     private var acknowledgedHistoryCursor: String?
@@ -77,7 +79,9 @@ public actor BandSessionMachine {
             sourceIdentity: sourceIdentity,
             acknowledgedCursor: acknowledgedHistoryCursor,
             lastHistoryComplete: lastDurableHistoryComplete,
-            durableSampleIdentities: durableSampleIdentities
+            durableSampleIdentities: durableSampleIdentities,
+            durableSampleFingerprints:
+                Set(durableSampleFingerprintsByIdentity.values)
         )
     }
 
@@ -399,8 +403,8 @@ public actor BandSessionMachine {
                 )
                 throw BandFailureCategory.invalidInput
             }
-            restoreDurableSampleIdentities(
-                restoredHistoryCheckpoint.durableSampleIdentities
+            restoreDurableSampleFingerprints(
+                restoredHistoryCheckpoint.durableSampleFingerprints
             )
             acknowledgedHistoryCursor =
                 restoredHistoryCheckpoint.acknowledgedCursor
@@ -1737,7 +1741,9 @@ public actor BandSessionMachine {
             )
             throw BandFailureCategory.busy
         }
-        if category == .securityFailure || category == .authentication {
+        if terminalFirmwareFailure {
+            invalidateAuthenticatedSession(nextState: .firmwareFailure)
+        } else if category == .securityFailure || category == .authentication {
             let liveWasActive = liveActive
             invalidateAuthenticatedSession(
                 nextState: category == .securityFailure
@@ -1764,8 +1770,6 @@ public actor BandSessionMachine {
             )
             await diagnostics.record(terminalEvents)
             return nil
-        } else if terminalFirmwareFailure {
-            invalidateAuthenticatedSession(nextState: .firmwareFailure)
         } else if token.operationClass == .firmware,
                   category == .disconnected
         {
@@ -2453,16 +2457,23 @@ public actor BandSessionMachine {
     private func clearDurableSampleIdentities() {
         durableSampleIdentities.removeAll(keepingCapacity: true)
         durableSamplesByIdentity.removeAll(keepingCapacity: true)
+        durableSampleFingerprintsByIdentity.removeAll(keepingCapacity: true)
         durableSampleIdentityOrder.removeAll(keepingCapacity: true)
         durableSampleIdentityNextEviction = 0
     }
 
-    private func restoreDurableSampleIdentities(
-        _ identities: Set<BandSampleIdentity>
+    private func restoreDurableSampleFingerprints(
+        _ fingerprints: Set<BandSampleFingerprint>
     ) {
         clearDurableSampleIdentities()
-        let ordered = identities.sorted(by: sampleIdentityPrecedes)
-        rememberDurableSampleIdentities(ordered)
+        let ordered = fingerprints.sorted {
+            sampleIdentityPrecedes($0.identity, $1.identity)
+        }
+        rememberDurableSampleIdentities(ordered.map(\.identity))
+        for fingerprint in ordered {
+            durableSampleFingerprintsByIdentity[fingerprint.identity] =
+                fingerprint
+        }
     }
 
     private func rememberDurableSampleIdentities(
@@ -2476,6 +2487,9 @@ public actor BandSessionMachine {
                     durableSampleIdentityOrder[durableSampleIdentityNextEviction]
                 durableSampleIdentities.remove(oldest)
                 durableSamplesByIdentity.removeValue(forKey: oldest)
+                durableSampleFingerprintsByIdentity.removeValue(
+                    forKey: oldest
+                )
                 durableSampleIdentityOrder[durableSampleIdentityNextEviction] =
                     identity
                 durableSampleIdentityNextEviction =
@@ -2493,6 +2507,8 @@ public actor BandSessionMachine {
         for sample in samples
         where durableSampleIdentities.contains(sample.identity) {
             durableSamplesByIdentity[sample.identity] = sample
+            durableSampleFingerprintsByIdentity[sample.identity] =
+                BandSampleFingerprint(sample: sample)
         }
     }
 
@@ -2506,7 +2522,7 @@ public actor BandSessionMachine {
 
         for sample in samples {
             if let incoming = incomingByIdentity[sample.identity] {
-                guard incoming == sample else {
+                guard incoming.hasEquivalentPayload(to: sample) else {
                     await diagnostics.record(
                         BandDiagnosticEvent(
                             kind: diagnosticKind,
@@ -2522,7 +2538,7 @@ public actor BandSessionMachine {
             incomingByIdentity[sample.identity] = sample
 
             if let durable = durableSamplesByIdentity[sample.identity] {
-                guard durable == sample else {
+                guard durable.hasEquivalentPayload(to: sample) else {
                     await diagnostics.record(
                         BandDiagnosticEvent(
                             kind: diagnosticKind,
@@ -2533,7 +2549,19 @@ public actor BandSessionMachine {
                     throw BandFailureCategory.invalidInput
                 }
                 duplicates += 1
-            } else if durableSampleIdentities.contains(sample.identity) {
+            } else if let fingerprint =
+                durableSampleFingerprintsByIdentity[sample.identity]
+            {
+                guard fingerprint.matches(sample) else {
+                    await diagnostics.record(
+                        BandDiagnosticEvent(
+                            kind: diagnosticKind,
+                            outcome: .rejected,
+                            failureCategory: .invalidInput
+                        )
+                    )
+                    throw BandFailureCategory.invalidInput
+                }
                 duplicates += 1
             } else {
                 unique.append(sample)
