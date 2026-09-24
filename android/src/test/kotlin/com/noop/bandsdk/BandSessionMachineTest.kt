@@ -2965,6 +2965,232 @@ class BandSessionMachineTest {
     }
 
     @Test
+    fun establishedFailuresTerminateActiveOperations() {
+        val historyRecorder = BandDiagnosticsRecorder()
+        val (
+            historySession,
+            historyGeneration,
+            historyConnectionToken,
+        ) = readySessionWithToken(historyRecorder)
+        val historyOperation =
+            historySession.beginOperation(BandOperationClass.HISTORY)
+        val historyEventCount = historyRecorder.snapshot().size
+
+        historySession.failEstablishedSession(
+            BandFailureCategory.AUTHENTICATION,
+            historyConnectionToken,
+            historyGeneration,
+        )
+
+        val rejected = historySession.snapshot()
+        assertEquals(BandSessionState.REJECTED, rejected.state)
+        assertEquals(historyGeneration + 1, rejected.generation)
+        assertNull(rejected.activeOperation)
+        assertEquals(
+            listOf(
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.HISTORY,
+                    BandDiagnosticOutcome.INTERRUPTED,
+                    failureCategory = BandFailureCategory.AUTHENTICATION,
+                    operationClass = BandOperationClass.HISTORY,
+                ),
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.AUTHENTICATION,
+                    BandDiagnosticOutcome.REJECTED,
+                    failureCategory = BandFailureCategory.AUTHENTICATION,
+                ),
+            ),
+            historyRecorder.snapshot().drop(historyEventCount),
+        )
+        val stale = assertFailsWith<BandException> {
+            historySession.cancelOperation(historyOperation)
+        }
+        assertEquals(BandFailureCategory.STALE_CALLBACK, stale.category)
+
+        val liveRecorder = BandDiagnosticsRecorder()
+        val (
+            liveSession,
+            liveGeneration,
+            liveConnectionToken,
+        ) = readySessionWithToken(liveRecorder)
+        liveSession.beginLive()
+        liveSession.beginOperation(BandOperationClass.BATTERY)
+        val liveEventCount = liveRecorder.snapshot().size
+
+        liveSession.failEstablishedSession(
+            BandFailureCategory.SECURITY_FAILURE,
+            liveConnectionToken,
+            liveGeneration,
+        )
+
+        val secured = liveSession.snapshot()
+        assertEquals(BandSessionState.SECURITY_FAILURE, secured.state)
+        assertEquals(liveGeneration + 1, secured.generation)
+        assertNull(secured.activeOperation)
+        assertFalse(secured.liveActive)
+        assertEquals(
+            listOf(
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.COMMAND,
+                    BandDiagnosticOutcome.INTERRUPTED,
+                    failureCategory = BandFailureCategory.SECURITY_FAILURE,
+                    operationClass = BandOperationClass.BATTERY,
+                ),
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.LIVE,
+                    BandDiagnosticOutcome.INTERRUPTED,
+                    failureCategory = BandFailureCategory.SECURITY_FAILURE,
+                ),
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.AUTHENTICATION,
+                    BandDiagnosticOutcome.REJECTED,
+                    failureCategory = BandFailureCategory.SECURITY_FAILURE,
+                ),
+            ),
+            liveRecorder.snapshot().drop(liveEventCount),
+        )
+    }
+
+    @Test
+    fun operationFailuresValidateCategoriesBeforeMutation() {
+        val recorder = BandDiagnosticsRecorder()
+        val (session, generation) = readySession(recorder)
+        val operation = session.beginOperation(BandOperationClass.BATTERY)
+
+        listOf(
+            BandFailureCategory.CLOSED,
+            BandFailureCategory.INCOMPATIBLE,
+            BandFailureCategory.BUSY,
+            BandFailureCategory.STORAGE,
+        ).forEach { category ->
+            val eventCount = recorder.snapshot().size
+            val invalid = assertFailsWith<BandException> {
+                session.failOperation(operation, category)
+            }
+            assertEquals(BandFailureCategory.INVALID_INPUT, invalid.category)
+            val unchanged = session.snapshot()
+            assertEquals(BandSessionState.EXECUTING_COMMAND, unchanged.state)
+            assertEquals(generation, unchanged.generation)
+            assertEquals(
+                BandOperationClass.BATTERY,
+                unchanged.activeOperation,
+            )
+            assertEquals(
+                listOf(
+                    BandDiagnosticEvent(
+                        BandDiagnosticKind.COMMAND,
+                        BandDiagnosticOutcome.REJECTED,
+                        failureCategory = BandFailureCategory.INVALID_INPUT,
+                        operationClass = BandOperationClass.BATTERY,
+                    ),
+                ),
+                recorder.snapshot().drop(eventCount),
+            )
+        }
+        session.failOperation(operation, BandFailureCategory.TIMEOUT)
+        assertEquals(BandSessionState.READY, session.snapshot().state)
+
+        val (historySession, _) = readySession()
+        val historyOperation =
+            historySession.beginOperation(BandOperationClass.HISTORY)
+        historySession.failOperation(
+            historyOperation,
+            BandFailureCategory.STORAGE,
+        )
+        assertEquals(BandSessionState.READY, historySession.snapshot().state)
+    }
+
+    @Test
+    fun operationAuthFailuresTerminateLiveInOrder() {
+        listOf(
+            BandFailureCategory.AUTHENTICATION,
+            BandFailureCategory.SECURITY_FAILURE,
+        ).forEach { category ->
+            val recorder = BandDiagnosticsRecorder()
+            val (session, generation) = readySession(recorder)
+            session.beginLive()
+            val operation =
+                session.beginOperation(BandOperationClass.BATTERY)
+            val eventCount = recorder.snapshot().size
+
+            session.failOperation(operation, category)
+
+            val terminal = session.snapshot()
+            assertEquals(
+                if (category == BandFailureCategory.SECURITY_FAILURE) {
+                    BandSessionState.SECURITY_FAILURE
+                } else {
+                    BandSessionState.REJECTED
+                },
+                terminal.state,
+            )
+            assertEquals(generation + 1, terminal.generation)
+            assertNull(terminal.activeOperation)
+            assertFalse(terminal.liveActive)
+            assertEquals(
+                listOf(
+                    BandDiagnosticEvent(
+                        BandDiagnosticKind.LIVE,
+                        BandDiagnosticOutcome.INTERRUPTED,
+                        failureCategory = category,
+                    ),
+                    BandDiagnosticEvent(
+                        BandDiagnosticKind.COMMAND,
+                        BandDiagnosticOutcome.FAILED,
+                        failureCategory = category,
+                        operationClass = BandOperationClass.BATTERY,
+                    ),
+                ),
+                recorder.snapshot().drop(eventCount),
+            )
+        }
+    }
+
+    @Test
+    fun terminalFirmwareDispositionDominatesAuthFailures() {
+        val firmwareCapabilities = VirtualBandFixtures.capabilities.copy(
+            capabilities =
+                VirtualBandFixtures.capabilities.capabilities +
+                    BandCapability.FIRMWARE_UPDATE,
+        )
+        listOf(
+            BandFailureCategory.AUTHENTICATION,
+            BandFailureCategory.SECURITY_FAILURE,
+        ).forEach { category ->
+            val recorder = BandDiagnosticsRecorder()
+            val (session, _) = readySessionWithCapabilities(
+                firmwareCapabilities,
+                recorder,
+            )
+            val operation =
+                session.beginOperation(BandOperationClass.FIRMWARE)
+            val eventCount = recorder.snapshot().size
+
+            session.failOperation(
+                operation,
+                category,
+                BandFirmwareFailureDisposition.TERMINAL,
+            )
+
+            assertEquals(
+                BandSessionState.FIRMWARE_FAILURE,
+                session.snapshot().state,
+            )
+            assertEquals(
+                listOf(
+                    BandDiagnosticEvent(
+                        BandDiagnosticKind.FIRMWARE,
+                        BandDiagnosticOutcome.TERMINAL,
+                        failureCategory = category,
+                        operationClass = BandOperationClass.FIRMWARE,
+                    ),
+                ),
+                recorder.snapshot().drop(eventCount),
+            )
+        }
+    }
+
+    @Test
     fun reconnectRequiresSessionBoundTokens() {
         val (session, generation, originalToken) = readySessionWithToken()
         val (foreignSession, foreignGeneration, foreignConnectionToken) =
@@ -3837,6 +4063,30 @@ class BandSessionMachineTest {
             ),
             liveGeneration,
         )
+        val conflictingHistory = overlappingHistory.copy(
+            chunkIdentity = "overlap-conflict",
+            nextCursor = "overlap-conflict-cursor",
+            acknowledgementToken = "overlap-conflict-ack",
+            batches = listOf(
+                overlappingHistory.batches.first().copy(
+                    samples = VirtualBandFixtures.liveBatch.samples.map {
+                        it.copy(value = it.value + 1)
+                    },
+                ),
+            ),
+        )
+        val historyConflict = assertFailsWith<BandException> {
+            liveFirst.stageHistoryChunk(
+                conflictingHistory,
+                liveFirstHistoryToken,
+                liveGeneration,
+            )
+        }
+        assertEquals(BandFailureCategory.INVALID_INPUT, historyConflict.category)
+        assertEquals(
+            BandOperationClass.HISTORY,
+            liveFirst.snapshot().activeOperation,
+        )
         val historyAfterLive = liveFirst.stageHistoryChunk(
             overlappingHistory,
             liveFirstHistoryToken,
@@ -3883,6 +4133,23 @@ class BandSessionMachineTest {
             historyFirstToken,
             historyGeneration,
         )
+        val conflictingLive = VirtualBandFixtures.liveBatch.copy(
+            samples = VirtualBandFixtures.liveBatch.samples.map {
+                it.copy(value = it.value + 1)
+            },
+        )
+        val liveConflict = assertFailsWith<BandException> {
+            historyFirst.stageLiveBatch(
+                conflictingLive,
+                historyFirstLiveToken,
+                historyGeneration,
+            )
+        }
+        assertEquals(BandFailureCategory.INVALID_INPUT, liveConflict.category)
+        assertEquals(
+            BandOperationClass.HISTORY,
+            historyFirst.snapshot().activeOperation,
+        )
         val liveAfterHistory = historyFirst.stageLiveBatch(
             VirtualBandFixtures.liveBatch,
             historyFirstLiveToken,
@@ -3899,6 +4166,89 @@ class BandSessionMachineTest {
             historyGeneration,
         )
         historyFirst.completeOperation(historyFirstToken)
+    }
+
+    @Test
+    fun restoredFingerprintsRejectConflictsAndNormalizeSignedZero() {
+        val identity = BandSampleIdentity(
+            stream = BandStreamKind.ACCELERATION,
+            sequence = 77,
+            deviceTimeMilliseconds = 77,
+        )
+        val positiveZero = BandSample(
+            identity = identity,
+            value = 0.0,
+            unit = BandUnit.GRAVITY,
+            quality = BandSampleQuality.ACCEPTED,
+        )
+        val negativeZero = positiveZero.copy(value = -0.0)
+        val fingerprint = BandSampleFingerprint(positiveZero)
+        assertEquals(
+            "a10e64de6afbbee0a9f4c4da6ab1e54" +
+                "a3c5a77adc94ba6c76092b1cf419a0046",
+            fingerprint.payloadFingerprint,
+        )
+        assertEquals(fingerprint, BandSampleFingerprint(negativeZero))
+        assertEquals(positiveZero, negativeZero)
+        assertEquals(positiveZero.hashCode(), negativeZero.hashCode())
+        assertTrue(positiveZero.hasEquivalentPayload(negativeZero))
+        assertEquals(
+            VirtualBandFixtures.liveBatch.copy(samples = listOf(positiveZero)),
+            VirtualBandFixtures.liveBatch.copy(samples = listOf(negativeZero)),
+        )
+
+        val checkpoint = BandHistoryCheckpoint(
+            sourceIdentity = VirtualBandFixtures.identity.sourceIdentity,
+            acknowledgedCursor = null,
+            lastHistoryComplete = null,
+            durableSampleIdentities = setOf(identity),
+            durableSampleFingerprints = setOf(fingerprint),
+        )
+        val (session, generation, _) = readySessionWithToken(
+            restoredHistoryCheckpoint = checkpoint,
+        )
+        val liveToken = session.beginLive()
+        val exactReplay = VirtualBandFixtures.liveBatch.copy(
+            samples = listOf(negativeZero),
+        )
+        val duplicate =
+            session.stageLiveBatch(exactReplay, liveToken, generation)
+        assertTrue(duplicate.acceptedSamples.isEmpty())
+        assertEquals(1, duplicate.duplicateSamples)
+        session.acknowledgeLive(
+            DurableLiveReceipt(
+                acceptance = duplicate,
+                committedSamples = 0,
+                committed = true,
+            ),
+            generation,
+        )
+
+        val conflict = assertFailsWith<BandException> {
+            session.stageLiveBatch(
+                exactReplay.copy(
+                    samples = listOf(positiveZero.copy(value = 1.0)),
+                ),
+                liveToken,
+                generation,
+            )
+        }
+        assertEquals(BandFailureCategory.INVALID_INPUT, conflict.category)
+
+        val legacyCheckpoint = BandHistoryCheckpoint(
+            sourceIdentity = VirtualBandFixtures.identity.sourceIdentity,
+            acknowledgedCursor = null,
+            lastHistoryComplete = null,
+            durableSampleIdentities = setOf(identity),
+        )
+        val (legacy, legacyGeneration, _) = readySessionWithToken(
+            restoredHistoryCheckpoint = legacyCheckpoint,
+        )
+        val legacyToken = legacy.beginLive()
+        val legacyReplay =
+            legacy.stageLiveBatch(exactReplay, legacyToken, legacyGeneration)
+        assertEquals(1, legacyReplay.acceptedSamples.size)
+        assertEquals(0, legacyReplay.duplicateSamples)
     }
 
     @Test
@@ -4452,8 +4802,12 @@ class BandSessionMachineTest {
         capabilities: BandCapabilityReport =
             VirtualBandFixtures.capabilities,
         identity: BandIdentity = VirtualBandFixtures.identity,
+        restoredHistoryCheckpoint: BandHistoryCheckpoint? = null,
     ): Triple<BandSessionMachine, Long, BandConnectionToken> {
-        val session = BandSessionMachine(diagnostics)
+        val session = BandSessionMachine(
+            diagnostics,
+            restoredHistoryCheckpoint,
+        )
         val scanToken = session.beginScan()
         val generation = scanToken.generation
         val connectionToken =

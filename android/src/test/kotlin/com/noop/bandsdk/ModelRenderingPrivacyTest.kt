@@ -7,6 +7,35 @@ import kotlin.test.assertTrue
 
 class ModelRenderingPrivacyTest {
     @Test
+    fun pairingCandidateRendersOnlyNonSensitiveDisplayState() {
+        val candidate = BandPairingCandidate(
+            handle = CANDIDATE_HANDLE_SENTINEL,
+            compatible = true,
+            identifyEligible = false,
+        )
+        val expected =
+            "BandPairingCandidate(" +
+                "compatible=true, " +
+                "identifyEligible=false" +
+                ")"
+        val rendered = listOf(
+            candidate.toString(),
+            "$candidate",
+            listOf(candidate).toString(),
+        )
+
+        rendered.forEach {
+            assertEquals(
+                if (it.startsWith("[")) "[$expected]" else expected,
+                it,
+            )
+            assertTrue(it.contains("compatible=true"))
+            assertTrue(it.contains("identifyEligible=false"))
+            assertPrivacySafe(it)
+        }
+    }
+
+    @Test
     fun modelsRenderTypeNamesWithoutSensitiveContent() {
         modelFixtures().forEach { (name, value) ->
             val direct = value.toString()
@@ -44,6 +73,10 @@ class ModelRenderingPrivacyTest {
             unit = BandUnit.BEATS_PER_MINUTE,
             quality = BandSampleQuality.DEGRADED,
         )
+        val sampleFingerprint = BandSampleFingerprint(
+            identity = sampleIdentity,
+            payloadFingerprint = FINGERPRINT_SENTINEL,
+        )
         val batch = BandSampleBatch(
             sourceIdentity = SOURCE_SENTINEL,
             lane = BandProvenanceLane.HISTORY,
@@ -80,6 +113,7 @@ class ModelRenderingPrivacyTest {
             ),
             "BandSampleIdentity" to sampleIdentity,
             "BandSample" to sample,
+            "BandSampleFingerprint" to sampleFingerprint,
             "BandSampleBatch" to batch,
             "BandHistoryRange" to retainedRange,
             "BandHistoryChunk" to chunk,
@@ -88,6 +122,7 @@ class ModelRenderingPrivacyTest {
                 acknowledgedCursor = CHECKPOINT_CURSOR_SENTINEL,
                 lastHistoryComplete = false,
                 durableSampleIdentities = setOf(sampleIdentity),
+                durableSampleFingerprints = setOf(sampleFingerprint),
             ),
             "BandSessionSnapshot" to BandSessionSnapshot(
                 state = BandSessionState.HISTORY_COLLECTING,
@@ -110,6 +145,8 @@ class ModelRenderingPrivacyTest {
     }
 
     private companion object {
+        const val CANDIDATE_HANDLE_SENTINEL =
+            "AA:BB:CC:DD:EE:FF/vendor-sentinel-5a27"
         const val SOURCE_SENTINEL = "sentinel-source-4f91"
         const val HARDWARE_SENTINEL = "sentinel-hardware-2d73"
         const val FIRMWARE_SENTINEL = "sentinel-firmware-8a15"
@@ -125,12 +162,16 @@ class ModelRenderingPrivacyTest {
         const val SAMPLE_SEQUENCE_SENTINEL = 9_876_543_210L
         const val SAMPLE_TIME_SENTINEL = 1_977_777_777_777L
         const val SAMPLE_VALUE_SENTINEL = 173.625
+        const val FINGERPRINT_SENTINEL =
+            "abcdef0123456789abcdef0123456789" +
+                "abcdef0123456789abcdef0123456789"
         const val LOST_START_SENTINEL = 1_977_777_770_000L
         const val LOST_END_SENTINEL = 1_977_777_771_000L
         const val RETAINED_START_SENTINEL = 1_977_777_772_000L
         const val RETAINED_END_SENTINEL = 1_977_777_773_000L
 
         val sensitiveSentinels = listOf(
+            CANDIDATE_HANDLE_SENTINEL,
             SOURCE_SENTINEL,
             HARDWARE_SENTINEL,
             FIRMWARE_SENTINEL,
@@ -146,6 +187,7 @@ class ModelRenderingPrivacyTest {
             SAMPLE_SEQUENCE_SENTINEL.toString(),
             SAMPLE_TIME_SENTINEL.toString(),
             SAMPLE_VALUE_SENTINEL.toString(),
+            FINGERPRINT_SENTINEL,
             LOST_START_SENTINEL.toString(),
             LOST_END_SENTINEL.toString(),
             RETAINED_START_SENTINEL.toString(),
@@ -153,6 +195,7 @@ class ModelRenderingPrivacyTest {
         )
 
         val sensitiveLabels = listOf(
+            "handle=",
             "sourceIdentity",
             "hardwareRevision",
             "firmwareVersion",
@@ -183,6 +226,8 @@ class ModelRenderingPrivacyTest {
             "acknowledgedCursor",
             "lastHistoryComplete",
             "durableSampleIdentities",
+            "durableSampleFingerprints",
+            "payloadFingerprint",
         )
     }
 }

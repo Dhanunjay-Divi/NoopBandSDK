@@ -77,8 +77,17 @@ replace or move ahead of an earlier completion.
 
 The application persists a source-scoped history checkpoint containing the
 last acknowledged cursor, whether the last durable range was terminal, and a
-bounded recent identity set. A new process may restore that checkpoint only
-for the same source identity.
+bounded recent identity set with canonical SHA-256 payload fingerprints. A new
+process may restore that checkpoint only for the same source identity. The
+fingerprint contract normalizes signed zero and uses the same fixed
+platform-neutral canonical bytes on Apple and Android. The digest provides
+collision-resistant replay evidence; it is not encryption or a privacy
+boundary. The checkpoint is sensitive integrity metadata and must remain in
+the application's encrypted local store, outside logs, diagnostics, analytics,
+and exports. A legacy identity-only checkpoint may still restore cursor and
+completion progress, but its identities do not suppress replay because they
+cannot distinguish an exact duplicate from a conflicting payload. Application
+storage remains the durable authority for those replays.
 
 History acceptance carries exact completion and circular-buffer overflow
 state. Cursor advancement requires a durable receipt that confirms those exact
