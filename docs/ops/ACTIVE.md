@@ -4,6 +4,7 @@ Last updated: **2026-09-24**
 
 ## Current round
 
+- [Legacy checkpoint restoration](rounds/2026-09-24-legacy-checkpoint-restoration.md)
 - [Application PR 17 post-review closeout](rounds/2026-09-23-app-pr17-post-review-closeout.md)
 - [Application PR 17 final review closeout](rounds/2026-09-23-app-pr17-final-review-closeout.md)
 - [Capability report equivalence](rounds/2026-09-23-capability-report-equivalence.md)
@@ -18,6 +19,18 @@ Last updated: **2026-09-24**
 
 ## Current boundary
 
+- The active 2026-09-24 checkpoint restoration candidate preserves the
+  identity set and durable count from legacy identity-only checkpoints while
+  retaining SDK-D-007: entries without payload fingerprints replay to
+  authoritative application storage rather than being suppressed without
+  conflict evidence. Mixed legacy/fingerprinted checkpoints are valid while
+  the process upgrades replay evidence. Exact-current local verification
+  passes Swift 106/106, Kotlin/JVM 114/114 plus `installDist`, shared
+  conformance 50/50, the 74-file repository gate, Swift parsing, and diff
+  hygiene. Independent exact-diff review found one P2 restart-test gap; the
+  added cross-platform regressions pass and the complete exact-current gates
+  remain green. Normal SDK pull-request integration, clean dual export,
+  application repin, and protected application integration remain pending.
 - Application PR `#17` exact head `aa3fa63c401fc60e486055ada3676df0f5f02d5b`
   passes all ten protected contexts and every hosted Apple, Android, package,
   server, policy, localization, operations, and trust job. Protected merge is

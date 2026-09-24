@@ -1,5 +1,6 @@
 # NOOP Band SDK operations rounds
 
+- [2026-09-24 - Legacy checkpoint restoration](2026-09-24-legacy-checkpoint-restoration.md)
 - [2026-09-23 - Application PR 17 post-review closeout](2026-09-23-app-pr17-post-review-closeout.md)
 - [2026-09-23 - Application PR 17 final review closeout](2026-09-23-app-pr17-final-review-closeout.md)
 - [2026-09-23 - Capability report equivalence](2026-09-23-capability-report-equivalence.md)

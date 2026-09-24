@@ -4235,20 +4235,100 @@ class BandSessionMachineTest {
         }
         assertEquals(BandFailureCategory.INVALID_INPUT, conflict.category)
 
-        val legacyCheckpoint = BandHistoryCheckpoint(
+        val legacyOnlyIdentity = BandSampleIdentity(
+            stream = BandStreamKind.ACCELERATION,
+            sequence = 78,
+            deviceTimeMilliseconds = 78,
+        )
+        val legacyOnlySample = BandSample(
+            identity = legacyOnlyIdentity,
+            value = 0.5,
+            unit = BandUnit.GRAVITY,
+            quality = BandSampleQuality.ACCEPTED,
+        )
+        val invalidPartialCheckpoint = BandHistoryCheckpoint(
             sourceIdentity = VirtualBandFixtures.identity.sourceIdentity,
             acknowledgedCursor = null,
             lastHistoryComplete = null,
             durableSampleIdentities = setOf(identity),
+            durableSampleFingerprints =
+                setOf(BandSampleFingerprint(legacyOnlySample)),
+        )
+        val invalidPartialFailure = assertFailsWith<BandException> {
+            invalidPartialCheckpoint.validate()
+        }
+        assertEquals(
+            BandFailureCategory.INVALID_INPUT,
+            invalidPartialFailure.category,
+        )
+
+        val legacyCheckpoint = BandHistoryCheckpoint(
+            sourceIdentity = VirtualBandFixtures.identity.sourceIdentity,
+            acknowledgedCursor = "legacy-cursor",
+            lastHistoryComplete = false,
+            durableSampleIdentities = setOf(
+                identity,
+                legacyOnlyIdentity,
+            ),
         )
         val (legacy, legacyGeneration, _) = readySessionWithToken(
             restoredHistoryCheckpoint = legacyCheckpoint,
+        )
+        assertEquals(2, legacy.snapshot().durableSampleCount)
+        assertEquals(
+            "legacy-cursor",
+            legacy.historyCheckpoint()?.acknowledgedCursor,
         )
         val legacyToken = legacy.beginLive()
         val legacyReplay =
             legacy.stageLiveBatch(exactReplay, legacyToken, legacyGeneration)
         assertEquals(1, legacyReplay.acceptedSamples.size)
         assertEquals(0, legacyReplay.duplicateSamples)
+        legacy.acknowledgeLive(
+            DurableLiveReceipt(
+                acceptance = legacyReplay,
+                committedSamples = 1,
+                committed = true,
+            ),
+            legacyGeneration,
+        )
+        val upgradedCheckpoint = requireNotNull(legacy.historyCheckpoint())
+        upgradedCheckpoint.validate()
+        assertEquals(2, upgradedCheckpoint.durableSampleIdentities.size)
+        assertEquals(1, upgradedCheckpoint.durableSampleFingerprints.size)
+
+        val (restarted, restartedGeneration, _) = readySessionWithToken(
+            restoredHistoryCheckpoint = upgradedCheckpoint,
+        )
+        assertEquals(2, restarted.snapshot().durableSampleCount)
+        val restartedToken = restarted.beginLive()
+        val fingerprintedReplay =
+            restarted.stageLiveBatch(
+                exactReplay,
+                restartedToken,
+                restartedGeneration,
+            )
+        assertTrue(fingerprintedReplay.acceptedSamples.isEmpty())
+        assertEquals(1, fingerprintedReplay.duplicateSamples)
+        restarted.acknowledgeLive(
+            DurableLiveReceipt(
+                acceptance = fingerprintedReplay,
+                committedSamples = 0,
+                committed = true,
+            ),
+            restartedGeneration,
+        )
+
+        val identityOnlyReplay = exactReplay.copy(
+            samples = listOf(legacyOnlySample),
+        )
+        val replayed = restarted.stageLiveBatch(
+            identityOnlyReplay,
+            restartedToken,
+            restartedGeneration,
+        )
+        assertEquals(listOf(legacyOnlySample), replayed.acceptedSamples)
+        assertEquals(0, replayed.duplicateSamples)
     }
 
     @Test

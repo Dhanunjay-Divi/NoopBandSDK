@@ -3952,15 +3952,47 @@ struct BandSessionMachineTests {
             )
         }
 
-        let legacyCheckpoint = BandHistoryCheckpoint(
+        let legacyOnlyIdentity = BandSampleIdentity(
+            stream: .acceleration,
+            sequence: 78,
+            deviceTimeMilliseconds: 78
+        )
+        let legacyOnlySample = BandSample(
+            identity: legacyOnlyIdentity,
+            value: 0.5,
+            unit: .gravity,
+            quality: .accepted
+        )
+        let invalidPartialCheckpoint = BandHistoryCheckpoint(
             sourceIdentity: VirtualBandFixtures.identity.sourceIdentity,
             acknowledgedCursor: nil,
             lastHistoryComplete: nil,
-            durableSampleIdentities: [identity]
+            durableSampleIdentities: [identity],
+            durableSampleFingerprints: [
+                BandSampleFingerprint(sample: legacyOnlySample),
+            ]
+        )
+        #expect(throws: BandFailureCategory.invalidInput) {
+            try invalidPartialCheckpoint.validate()
+        }
+
+        let legacyCheckpoint = BandHistoryCheckpoint(
+            sourceIdentity: VirtualBandFixtures.identity.sourceIdentity,
+            acknowledgedCursor: "legacy-cursor",
+            lastHistoryComplete: false,
+            durableSampleIdentities: [
+                identity,
+                legacyOnlyIdentity,
+            ]
         )
         let (legacy, legacyGeneration, _) = try await readySessionWithToken(
             capabilities: VirtualBandFixtures.capabilities,
             historyCheckpoint: legacyCheckpoint
+        )
+        #expect(await legacy.snapshot().durableSampleCount == 2)
+        #expect(
+            await legacy.historyCheckpoint()?.acknowledgedCursor
+                == "legacy-cursor"
         )
         let legacyToken = try await legacy.beginLive()
         let legacyReplay = try await legacy.stageLiveBatch(
@@ -3970,6 +4002,58 @@ struct BandSessionMachineTests {
         )
         #expect(legacyReplay.acceptedSamples.count == 1)
         #expect(legacyReplay.duplicateSamples == 0)
+        try await legacy.acknowledgeLive(
+            receipt: DurableLiveReceipt(
+                acceptance: legacyReplay,
+                committedSamples: 1,
+                committed: true
+            ),
+            callbackGeneration: legacyGeneration
+        )
+        let upgradedCheckpoint = try #require(
+            await legacy.historyCheckpoint()
+        )
+        try upgradedCheckpoint.validate()
+        #expect(upgradedCheckpoint.durableSampleIdentities.count == 2)
+        #expect(upgradedCheckpoint.durableSampleFingerprints.count == 1)
+
+        let (restarted, restartedGeneration, _) =
+            try await readySessionWithToken(
+                capabilities: VirtualBandFixtures.capabilities,
+                historyCheckpoint: upgradedCheckpoint
+            )
+        #expect(await restarted.snapshot().durableSampleCount == 2)
+        let restartedToken = try await restarted.beginLive()
+        let fingerprintedReplay = try await restarted.stageLiveBatch(
+            exactReplay,
+            token: restartedToken,
+            callbackGeneration: restartedGeneration
+        )
+        #expect(fingerprintedReplay.acceptedSamples.isEmpty)
+        #expect(fingerprintedReplay.duplicateSamples == 1)
+        try await restarted.acknowledgeLive(
+            receipt: DurableLiveReceipt(
+                acceptance: fingerprintedReplay,
+                committedSamples: 0,
+                committed: true
+            ),
+            callbackGeneration: restartedGeneration
+        )
+
+        let identityOnlyReplay = BandSampleBatch(
+            sourceIdentity: exactReplay.sourceIdentity,
+            lane: exactReplay.lane,
+            parserRevision: exactReplay.parserRevision,
+            calibrationRevision: exactReplay.calibrationRevision,
+            samples: [legacyOnlySample]
+        )
+        let replayed = try await restarted.stageLiveBatch(
+            identityOnlyReplay,
+            token: restartedToken,
+            callbackGeneration: restartedGeneration
+        )
+        #expect(replayed.acceptedSamples == [legacyOnlySample])
+        #expect(replayed.duplicateSamples == 0)
     }
 
     @Test("Invalid history tokens record bounded rejection diagnostics")
