@@ -2546,6 +2546,197 @@ struct BandSessionMachineTests {
         #expect(await second.snapshot().state == .rejected)
     }
 
+    @Test("Established failures terminate active operations")
+    func establishedFailuresTerminateActiveOperations() async throws {
+        let historyRecorder = BandDiagnosticsRecorder()
+        let (
+            historySession,
+            historyGeneration,
+            historyConnectionToken
+        ) = try await readySessionWithToken(diagnostics: historyRecorder)
+        let historyOperation =
+            try await historySession.beginOperation(.history)
+        let historyEventCount = await historyRecorder.snapshot().count
+
+        try await historySession.failEstablishedSession(
+            .authentication,
+            token: historyConnectionToken,
+            callbackGeneration: historyGeneration
+        )
+
+        let rejected = await historySession.snapshot()
+        #expect(rejected.state == .rejected)
+        #expect(rejected.generation == historyGeneration + 1)
+        #expect(rejected.activeOperation == nil)
+        #expect(
+            Array(
+                await historyRecorder.snapshot().dropFirst(
+                    historyEventCount
+                )
+            ) == [
+                BandDiagnosticEvent(
+                    kind: .history,
+                    outcome: .interrupted,
+                    failureCategory: .authentication,
+                    operationClass: .history
+                ),
+                BandDiagnosticEvent(
+                    kind: .authentication,
+                    outcome: .rejected,
+                    failureCategory: .authentication
+                ),
+            ]
+        )
+        await #expect(throws: BandFailureCategory.staleCallback) {
+            try await historySession.cancelOperation(historyOperation)
+        }
+
+        let liveRecorder = BandDiagnosticsRecorder()
+        let (
+            liveSession,
+            liveGeneration,
+            liveConnectionToken
+        ) = try await readySessionWithToken(diagnostics: liveRecorder)
+        _ = try await liveSession.beginLive()
+        _ = try await liveSession.beginOperation(.battery)
+        let liveEventCount = await liveRecorder.snapshot().count
+
+        try await liveSession.failEstablishedSession(
+            .securityFailure,
+            token: liveConnectionToken,
+            callbackGeneration: liveGeneration
+        )
+
+        let secured = await liveSession.snapshot()
+        #expect(secured.state == .securityFailure)
+        #expect(secured.generation == liveGeneration + 1)
+        #expect(secured.activeOperation == nil)
+        #expect(!secured.liveActive)
+        #expect(
+            Array(
+                await liveRecorder.snapshot().dropFirst(liveEventCount)
+            ) == [
+                BandDiagnosticEvent(
+                    kind: .command,
+                    outcome: .interrupted,
+                    failureCategory: .securityFailure,
+                    operationClass: .battery
+                ),
+                BandDiagnosticEvent(
+                    kind: .live,
+                    outcome: .interrupted,
+                    failureCategory: .securityFailure
+                ),
+                BandDiagnosticEvent(
+                    kind: .authentication,
+                    outcome: .rejected,
+                    failureCategory: .securityFailure
+                ),
+            ]
+        )
+    }
+
+    @Test("Operation failures validate categories before mutation")
+    func operationFailuresValidateCategoriesBeforeMutation() async throws {
+        let recorder = BandDiagnosticsRecorder()
+        let (session, generation) = try await readySession(
+            diagnostics: recorder
+        )
+        let operation = try await session.beginOperation(.battery)
+
+        for category in [
+            BandFailureCategory.closed,
+            .incompatible,
+            .busy,
+            .storage,
+        ] {
+            let eventCount = await recorder.snapshot().count
+            await #expect(throws: BandFailureCategory.invalidInput) {
+                _ = try await session.failOperation(
+                    operation,
+                    category: category
+                )
+            }
+            let unchanged = await session.snapshot()
+            #expect(unchanged.state == .executingCommand)
+            #expect(unchanged.generation == generation)
+            #expect(unchanged.activeOperation == .battery)
+            #expect(
+                Array(
+                    await recorder.snapshot().dropFirst(eventCount)
+                ) == [
+                    BandDiagnosticEvent(
+                        kind: .command,
+                        outcome: .rejected,
+                        failureCategory: .invalidInput,
+                        operationClass: .battery
+                    ),
+                ]
+            )
+        }
+        _ = try await session.failOperation(operation, category: .timeout)
+        #expect(await session.snapshot().state == .ready)
+
+        let (historySession, _) = try await readySession()
+        let historyOperation =
+            try await historySession.beginOperation(.history)
+        _ = try await historySession.failOperation(
+            historyOperation,
+            category: .storage
+        )
+        #expect(await historySession.snapshot().state == .ready)
+    }
+
+    @Test("Operation auth failures terminate live before operation failure")
+    func operationAuthFailuresTerminateLiveInOrder() async throws {
+        for category in [
+            BandFailureCategory.authentication,
+            .securityFailure,
+        ] {
+            let recorder = BandDiagnosticsRecorder()
+            let (session, generation) = try await readySession(
+                diagnostics: recorder
+            )
+            _ = try await session.beginLive()
+            let operation = try await session.beginOperation(.battery)
+            let eventCount = await recorder.snapshot().count
+
+            _ = try await session.failOperation(
+                operation,
+                category: category
+            )
+
+            let terminal = await session.snapshot()
+            #expect(
+                terminal.state == (
+                    category == .securityFailure
+                        ? .securityFailure
+                        : .rejected
+                )
+            )
+            #expect(terminal.generation == generation + 1)
+            #expect(terminal.activeOperation == nil)
+            #expect(!terminal.liveActive)
+            #expect(
+                Array(
+                    await recorder.snapshot().dropFirst(eventCount)
+                ) == [
+                    BandDiagnosticEvent(
+                        kind: .live,
+                        outcome: .interrupted,
+                        failureCategory: category
+                    ),
+                    BandDiagnosticEvent(
+                        kind: .command,
+                        outcome: .failed,
+                        failureCategory: category,
+                        operationClass: .battery
+                    ),
+                ]
+            )
+        }
+    }
+
     @Test("Reconnect requires session-bound authority and issues a new connection token")
     func reconnectRequiresSessionBoundTokens() async throws {
         let (session, generation, originalToken) =
@@ -3502,6 +3693,41 @@ struct BandSessionMachineTests {
             ),
             callbackGeneration: liveGeneration
         )
+        let conflictingHistory = BandHistoryChunk(
+            chunkIdentity: "overlap-conflict",
+            previousCursor: nil,
+            nextCursor: "overlap-conflict-cursor",
+            complete: true,
+            overflowed: false,
+            retainedRange: overlappingHistory.retainedRange,
+            firstLostRange: nil,
+            acknowledgementToken: "overlap-conflict-ack",
+            batches: [
+                BandSampleBatch(
+                    sourceIdentity:
+                        VirtualBandFixtures.identity.sourceIdentity,
+                    lane: .history,
+                    parserRevision: "parser-v1",
+                    calibrationRevision: "calibration-v1",
+                    samples: VirtualBandFixtures.liveBatch.samples.map {
+                        BandSample(
+                            identity: $0.identity,
+                            value: $0.value + 1,
+                            unit: $0.unit,
+                            quality: $0.quality
+                        )
+                    }
+                ),
+            ]
+        )
+        await #expect(throws: BandFailureCategory.invalidInput) {
+            _ = try await liveFirst.stageHistoryChunk(
+                conflictingHistory,
+                token: liveFirstHistoryToken,
+                callbackGeneration: liveGeneration
+            )
+        }
+        #expect(await liveFirst.snapshot().activeOperation == .history)
         let historyAfterLive = try await liveFirst.stageHistoryChunk(
             overlappingHistory,
             token: liveFirstHistoryToken,
@@ -3547,6 +3773,28 @@ struct BandSessionMachineTests {
             token: historyFirstToken,
             callbackGeneration: historyGeneration
         )
+        let conflictingLive = BandSampleBatch(
+            sourceIdentity: VirtualBandFixtures.identity.sourceIdentity,
+            lane: .live,
+            parserRevision: "parser-v1",
+            calibrationRevision: "calibration-v1",
+            samples: VirtualBandFixtures.liveBatch.samples.map {
+                BandSample(
+                    identity: $0.identity,
+                    value: $0.value + 1,
+                    unit: $0.unit,
+                    quality: $0.quality
+                )
+            }
+        )
+        await #expect(throws: BandFailureCategory.invalidInput) {
+            _ = try await historyFirst.stageLiveBatch(
+                conflictingLive,
+                token: historyFirstLiveToken,
+                callbackGeneration: historyGeneration
+            )
+        }
+        #expect(await historyFirst.snapshot().activeOperation == .history)
         let liveAfterHistory = try await historyFirst.stageLiveBatch(
             VirtualBandFixtures.liveBatch,
             token: historyFirstLiveToken,

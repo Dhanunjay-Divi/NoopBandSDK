@@ -3,13 +3,13 @@ import Foundation
 public actor BandSessionMachine {
     private struct PendingLive {
         let acceptance: LiveAcceptance
-        let sampleIdentities: [BandSampleIdentity]
+        let samples: [BandSample]
         let expectedSampleCount: Int
     }
 
     private struct PendingHistory {
         let acceptance: HistoryAcceptance
-        let sampleIdentities: [BandSampleIdentity]
+        let samples: [BandSample]
         let expectedSampleCount: Int
     }
 
@@ -41,6 +41,7 @@ public actor BandSessionMachine {
     private var historyOperationReceivedDurableReceipt = false
     private var historyOperationLastReceiptComplete: Bool?
     private var durableSampleIdentities: Set<BandSampleIdentity> = []
+    private var durableSamplesByIdentity: [BandSampleIdentity: BandSample] = [:]
     private var durableSampleIdentityOrder: [BandSampleIdentity] = []
     private var durableSampleIdentityNextEviction = 0
     private var acknowledgedHistoryCursor: String?
@@ -760,7 +761,10 @@ public actor BandSessionMachine {
             )
             throw BandFailureCategory.busy
         }
-        guard state == .ready || state == .liveCollecting else {
+        guard state == .ready
+            || state == .liveCollecting
+            || isActiveOperationalState
+        else {
             await diagnostics.record(
                 BandDiagnosticEvent(
                     kind: .authentication,
@@ -781,34 +785,43 @@ public actor BandSessionMachine {
             throw BandFailureCategory.invalidInput
         }
 
+        let interruptedOperation = activeOperation
         let liveWasActive = liveActive
         invalidateAuthenticatedSession(
             nextState: category == .securityFailure
                 ? .securityFailure
                 : .rejected
         )
-        await diagnostics.record(
-            (liveWasActive
-                ? [
-                    BandDiagnosticEvent(
-                        kind: .live,
-                        outcome: .interrupted,
-                        failureCategory: category
+        var terminalEvents: [BandDiagnosticEvent] = []
+        if let interruptedOperation {
+            terminalEvents.append(
+                BandDiagnosticEvent(
+                    kind: diagnosticKind(
+                        for: interruptedOperation.operationClass
                     ),
-                    BandDiagnosticEvent(
-                        kind: .authentication,
-                        outcome: .rejected,
-                        failureCategory: category
-                    ),
-                ]
-                : [
-                    BandDiagnosticEvent(
-                        kind: .authentication,
-                        outcome: .rejected,
-                        failureCategory: category
-                    ),
-                ])
+                    outcome: .interrupted,
+                    failureCategory: category,
+                    operationClass: interruptedOperation.operationClass
+                )
+            )
+        }
+        if liveWasActive {
+            terminalEvents.append(
+                BandDiagnosticEvent(
+                    kind: .live,
+                    outcome: .interrupted,
+                    failureCategory: category
+                )
+            )
+        }
+        terminalEvents.append(
+            BandDiagnosticEvent(
+                kind: .authentication,
+                outcome: .rejected,
+                failureCategory: category
+            )
         )
+        await diagnostics.record(terminalEvents)
     }
 
     public func beginLive(
@@ -997,15 +1010,15 @@ public actor BandSessionMachine {
         guard let capabilityReport else {
             throw BandFailureCategory.invalidState
         }
-        var acceptedIdentities: Set<BandSampleIdentity> = []
-        let unique = batch.samples.filter { sample in
-            !durableSampleIdentities.contains(sample.identity)
-                && acceptedIdentities.insert(sample.identity).inserted
-        }
+        let deduplicated = try await deduplicateSamples(
+            batch.samples,
+            diagnosticKind: .live
+        )
+        let unique = deduplicated.unique
         nextLiveReceiptSequence &+= 1
         let acceptance = LiveAcceptance(
             acceptedSamples: unique,
-            duplicateSamples: batch.samples.count - unique.count,
+            duplicateSamples: deduplicated.duplicates,
             capabilityReportRevision: capabilityReport.reportRevision,
             parserRevision: batch.parserRevision,
             calibrationRevision: batch.calibrationRevision,
@@ -1015,7 +1028,7 @@ public actor BandSessionMachine {
         )
         pendingLive = PendingLive(
             acceptance: acceptance,
-            sampleIdentities: unique.map(\.identity),
+            samples: unique,
             expectedSampleCount: unique.count
         )
         await diagnostics.recordCoalescingLatest(
@@ -1083,7 +1096,7 @@ public actor BandSessionMachine {
             )
             throw BandFailureCategory.storage
         }
-        rememberDurableSampleIdentities(pendingLive.sampleIdentities)
+        rememberDurableSamples(pendingLive.samples)
         liveReceiptCompleting = true
         await diagnostics.recordCoalescingConsecutive(
             BandDiagnosticEvent(
@@ -1380,16 +1393,24 @@ public actor BandSessionMachine {
             throw BandFailureCategory.invalidInput
         }
 
-        var uniqueSet: Set<BandSampleIdentity> = []
         var unique: [AcceptedHistorySample] = []
-        var duplicateCount = 0
+        var incomingSamples: [BandSample] = []
         for batch in chunk.batches {
             for sample in batch.samples {
-                if durableSampleIdentities.contains(sample.identity)
-                    || !uniqueSet.insert(sample.identity).inserted
-                {
-                    duplicateCount += 1
-                } else {
+                incomingSamples.append(sample)
+            }
+        }
+        let deduplicated = try await deduplicateSamples(
+            incomingSamples,
+            diagnosticKind: .history
+        )
+        let acceptedIdentities = Set(deduplicated.unique.map(\.identity))
+        var appendedIdentities: Set<BandSampleIdentity> = []
+        for batch in chunk.batches {
+            for sample in batch.samples
+            where acceptedIdentities.contains(sample.identity)
+                && appendedIdentities.insert(sample.identity).inserted
+            {
                     unique.append(
                         AcceptedHistorySample(
                             batch: batch,
@@ -1398,7 +1419,6 @@ public actor BandSessionMachine {
                             sample: sample
                         )
                     )
-                }
             }
         }
         nextHistoryReceiptSequence &+= 1
@@ -1413,13 +1433,13 @@ public actor BandSessionMachine {
             retainedRange: chunk.retainedRange,
             firstLostRange: chunk.firstLostRange,
             acceptedSamples: unique,
-            duplicateSamples: duplicateCount,
+            duplicateSamples: deduplicated.duplicates,
             sessionNonce: sessionNonce,
             receiptSequence: nextHistoryReceiptSequence
         )
         pendingHistory = PendingHistory(
             acceptance: acceptance,
-            sampleIdentities: unique.map(\.sample.identity),
+            samples: unique.map(\.sample),
             expectedSampleCount: unique.count
         )
         await diagnostics.record(
@@ -1513,7 +1533,7 @@ public actor BandSessionMachine {
         }
 
         historyReceiptCompleting = true
-        rememberDurableSampleIdentities(pendingHistory.sampleIdentities)
+        rememberDurableSamples(pendingHistory.samples)
         acknowledgedHistoryCursor = receipt.nextCursor
         lastDurableHistoryComplete = pendingHistory.acceptance.complete
         historyOperationReceivedDurableReceipt = true
@@ -1683,6 +1703,19 @@ public actor BandSessionMachine {
             )
             throw BandFailureCategory.invalidInput
         }
+        guard operationFailureCategories(
+            for: token.operationClass
+        ).contains(category) else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: operationDiagnosticKind,
+                    outcome: .rejected,
+                    failureCategory: .invalidInput,
+                    operationClass: token.operationClass
+                )
+            )
+            throw BandFailureCategory.invalidInput
+        }
         let terminalFirmwareFailure =
             token.operationClass == .firmware
             && firmwareDisposition == .terminal
@@ -1704,12 +1737,35 @@ public actor BandSessionMachine {
             )
             throw BandFailureCategory.busy
         }
-        if category == .securityFailure {
-            invalidateAuthenticatedSession(nextState: .securityFailure)
+        if category == .securityFailure || category == .authentication {
+            let liveWasActive = liveActive
+            invalidateAuthenticatedSession(
+                nextState: category == .securityFailure
+                    ? .securityFailure
+                    : .rejected
+            )
+            var terminalEvents: [BandDiagnosticEvent] = []
+            if liveWasActive {
+                terminalEvents.append(
+                    BandDiagnosticEvent(
+                        kind: .live,
+                        outcome: .interrupted,
+                        failureCategory: category
+                    )
+                )
+            }
+            terminalEvents.append(
+                BandDiagnosticEvent(
+                    kind: operationDiagnosticKind,
+                    outcome: .failed,
+                    failureCategory: category,
+                    operationClass: token.operationClass
+                )
+            )
+            await diagnostics.record(terminalEvents)
+            return nil
         } else if terminalFirmwareFailure {
             invalidateAuthenticatedSession(nextState: .firmwareFailure)
-        } else if category == .authentication {
-            invalidateAuthenticatedSession(nextState: .rejected)
         } else if token.operationClass == .firmware,
                   category == .disconnected
         {
@@ -2396,6 +2452,7 @@ public actor BandSessionMachine {
 
     private func clearDurableSampleIdentities() {
         durableSampleIdentities.removeAll(keepingCapacity: true)
+        durableSamplesByIdentity.removeAll(keepingCapacity: true)
         durableSampleIdentityOrder.removeAll(keepingCapacity: true)
         durableSampleIdentityNextEviction = 0
     }
@@ -2418,6 +2475,7 @@ public actor BandSessionMachine {
                 let oldest =
                     durableSampleIdentityOrder[durableSampleIdentityNextEviction]
                 durableSampleIdentities.remove(oldest)
+                durableSamplesByIdentity.removeValue(forKey: oldest)
                 durableSampleIdentityOrder[durableSampleIdentityNextEviction] =
                     identity
                 durableSampleIdentityNextEviction =
@@ -2428,6 +2486,105 @@ public actor BandSessionMachine {
             }
             durableSampleIdentities.insert(identity)
         }
+    }
+
+    private func rememberDurableSamples(_ samples: [BandSample]) {
+        rememberDurableSampleIdentities(samples.map(\.identity))
+        for sample in samples
+        where durableSampleIdentities.contains(sample.identity) {
+            durableSamplesByIdentity[sample.identity] = sample
+        }
+    }
+
+    private func deduplicateSamples(
+        _ samples: [BandSample],
+        diagnosticKind: BandDiagnosticKind
+    ) async throws -> (unique: [BandSample], duplicates: Int) {
+        var incomingByIdentity: [BandSampleIdentity: BandSample] = [:]
+        var unique: [BandSample] = []
+        var duplicates = 0
+
+        for sample in samples {
+            if let incoming = incomingByIdentity[sample.identity] {
+                guard incoming == sample else {
+                    await diagnostics.record(
+                        BandDiagnosticEvent(
+                            kind: diagnosticKind,
+                            outcome: .rejected,
+                            failureCategory: .invalidInput
+                        )
+                    )
+                    throw BandFailureCategory.invalidInput
+                }
+                duplicates += 1
+                continue
+            }
+            incomingByIdentity[sample.identity] = sample
+
+            if let durable = durableSamplesByIdentity[sample.identity] {
+                guard durable == sample else {
+                    await diagnostics.record(
+                        BandDiagnosticEvent(
+                            kind: diagnosticKind,
+                            outcome: .rejected,
+                            failureCategory: .invalidInput
+                        )
+                    )
+                    throw BandFailureCategory.invalidInput
+                }
+                duplicates += 1
+            } else if durableSampleIdentities.contains(sample.identity) {
+                duplicates += 1
+            } else {
+                unique.append(sample)
+            }
+        }
+        return (unique, duplicates)
+    }
+
+    private var isActiveOperationalState: Bool {
+        guard let operationClass = activeOperation?.operationClass else {
+            return false
+        }
+        switch operationClass {
+        case .history:
+            return state == .historyCollecting
+        case .firmware:
+            return state == .updatingFirmware
+        default:
+            return state == .executingCommand
+        }
+    }
+
+    private func operationFailureCategories(
+        for operationClass: BandOperationClass
+    ) -> Set<BandFailureCategory> {
+        var categories: Set<BandFailureCategory> = [
+            .unavailable,
+            .permission,
+            .noResult,
+            .timeout,
+            .rejected,
+            .authentication,
+            .securityFailure,
+            .disconnected,
+            .lowBattery,
+            .unsupported,
+            .internalFailure,
+        ]
+        switch operationClass {
+        case .history:
+            categories.formUnion([.storage, .historyStalled])
+        case .firmware:
+            categories.formUnion([
+                .updateNotEligible,
+                .updateInterrupted,
+                .updateVerification,
+            ])
+        default:
+            break
+        }
+        return categories
     }
 
     private func sampleIdentityPrecedes(
